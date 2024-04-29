@@ -1,7 +1,6 @@
 package rate
 
 import (
-	"context"
 	"testing"
 	"time"
 )
@@ -85,34 +84,5 @@ func TestLimiter_WaitRateChanges(t *testing.T) {
 	}
 	if d > want+variance {
 		t.Errorf("%v > %v", d, want+variance)
-	}
-}
-
-func TestLimiter_TickerRespectsContext(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-	ch := NewTicker(ctx, nil)
-	select {
-	case _, ok := <-ch:
-		if ok {
-			t.Error("got a tick")
-		}
-	default:
-	}
-}
-
-func TestLimiter_NewTicker(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	ch := NewTicker(ctx, nil)
-	now := time.Now()
-	for i := 0; i < 100; i++ {
-		_, ok := <-ch
-		if !ok {
-			t.Error("ticker channel closed early")
-		}
-	}
-	if d := time.Since(now); d > variance {
-		t.Errorf("%v > %v", d, variance)
 	}
 }

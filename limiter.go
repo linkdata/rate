@@ -1,7 +1,6 @@
 package rate
 
 import (
-	"context"
 	"sync/atomic"
 	"time"
 )
@@ -18,30 +17,6 @@ type Limiter struct {
 	currRate  int32
 	count     int32
 	countMax  int32
-}
-
-// NewTicker returns a channel that sends a `struct{}{}`
-// at most `*rate` times per second.
-//
-// A nil `rate` or a `*rate` of zero or less sends
-// as quickly as possible.
-//
-// The channel is closed when the context is done.
-func NewTicker(ctx context.Context, rate *int32) <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		defer close(ch)
-		var rl Limiter
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case ch <- struct{}{}:
-			}
-			rl.Wait(rate)
-		}
-	}()
-	return ch
 }
 
 // Wait sleeps at least long enough to ensure that the
