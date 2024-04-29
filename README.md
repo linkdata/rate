@@ -5,5 +5,4 @@
 
 ## An efficient rate limiter for Go
 
-Because I found out that 99% of the CPU consumed was
-`golang.org/x/time/rate.Limiter.Wait()` calling `time.Now()`.
+Because too much of the CPU consumed was `golang.org/x/time/rate.Limiter.Wait()` calling `time.Now()`.
