@@ -14,28 +14,28 @@ const sleepGranularity = 500
 type Limiter struct {
 	lastEnded time.Time
 	sleepDur  time.Duration
-	currRate  int32
+	maxRate   int32
 	count     int32
 	countMax  int32
 }
 
 // Wait sleeps at least long enough to ensure that the
-// given `*rate` of events per second is not exceeded.
+// given `*maxrate` of events per second is not exceeded.
 //
-// A nil `rate` or a `*rate` of zero or less doesn't wait at all.
-func (rl *Limiter) Wait(rate *int32) {
-	if rate != nil {
-		if wantRate := atomic.LoadInt32(rate); wantRate != rl.currRate {
-			rl.currRate = wantRate
+// A nil `maxrate` or a `*maxrate` of zero or less doesn't wait at all.
+func (rl *Limiter) Wait(maxrate *int32) {
+	if maxrate != nil {
+		if newRate := atomic.LoadInt32(maxrate); newRate != rl.maxRate {
+			rl.maxRate = newRate
 			rl.lastEnded = time.Now()
 			rl.count = 0
-			if wantRate > 0 {
-				countMax := wantRate / sleepGranularity
+			if newRate > 0 {
+				countMax := newRate / sleepGranularity
 				if countMax < 1 {
 					countMax = 1
 				}
 				rl.countMax = countMax
-				rl.sleepDur = time.Second / time.Duration(wantRate/rl.countMax)
+				rl.sleepDur = time.Second / time.Duration(newRate/rl.countMax)
 			} else {
 				rl.countMax = 0
 				rl.sleepDur = 0
