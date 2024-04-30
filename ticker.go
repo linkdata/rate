@@ -15,7 +15,7 @@ import (
 // as quickly as possible.
 //
 // The channel is closed when the context is done.
-func NewTicker(ctx context.Context, maxrate *int32, counter *uint64) <-chan struct{} {
+func NewTicker(ctx context.Context, maxrate *int32, counter *uint64) chan struct{} {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
@@ -45,7 +45,7 @@ func NewTicker(ctx context.Context, maxrate *int32, counter *uint64) <-chan stru
 // Use this to make "background" tickers that are less prioritized.
 //
 // The channel is closed when the parent channel is closed.
-func NewSubTicker(parent <-chan struct{}, maxrate *int32, counter *uint64) <-chan struct{} {
+func NewSubTicker(parent <-chan struct{}, maxrate *int32, counter *uint64) chan struct{} {
 	ch := make(chan struct{})
 	go func() {
 		defer close(ch)
