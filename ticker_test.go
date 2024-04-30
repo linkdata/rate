@@ -8,7 +8,8 @@ import (
 )
 
 func TestTickerClosing(t *testing.T) {
-	ticker := NewTicker(nil, nil)
+	maxrate := int32(time.Second / variance * 2)
+	ticker := NewTicker(&maxrate, nil)
 	ticker.Close()
 	select {
 	case _, ok := <-ticker.C:
