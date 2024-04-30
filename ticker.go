@@ -9,17 +9,17 @@ import (
 type Ticker struct {
 	C       <-chan struct{}
 	ch      chan struct{}
-	closing atomic.Bool
-	stopped atomic.Bool
+	closing int32
+	stopped int32
 }
 
 // Close stops the Ticker and frees resources.
 //
 // It is safe to call multiple times or concurrently.
 func (ticker *Ticker) Close() {
-	if ticker.closing.CompareAndSwap(false, true) {
+	if atomic.CompareAndSwapInt32(&ticker.closing, 0, 1) {
 		defer close(ticker.ch)
-		for !ticker.stopped.Load() {
+		for atomic.LoadInt32(&ticker.stopped) != 1 {
 			select {
 			case <-ticker.ch:
 			default:
@@ -32,7 +32,7 @@ func (ticker *Ticker) Close() {
 // AddTick adds a single tick to the Ticker, retrying with the
 // given interval until it succeeds or the Ticker is closed.
 func (ticker *Ticker) AddTick(d time.Duration) {
-	for !ticker.stopped.Load() && !ticker.closing.Load() {
+	for atomic.LoadInt32(&ticker.stopped)+atomic.LoadInt32(&ticker.closing) == 0 {
 		select {
 		case ticker.ch <- struct{}{}:
 			return
@@ -44,11 +44,11 @@ func (ticker *Ticker) AddTick(d time.Duration) {
 
 func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint64) {
 	defer func() {
-		ticker.stopped.Store(true)
+		atomic.StoreInt32(&ticker.stopped, 1)
 		ticker.Close()
 	}()
 	var rl Limiter
-	for !ticker.closing.Load() {
+	for atomic.LoadInt32(&ticker.closing) == 0 {
 		if parent != nil {
 			if _, ok := <-parent; !ok {
 				break
