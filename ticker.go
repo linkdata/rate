@@ -9,6 +9,7 @@ import (
 type Ticker struct {
 	C       <-chan struct{}
 	ch      chan struct{}
+	waiting int32
 	closing int32
 	stopped int32
 }
@@ -27,6 +28,14 @@ func (ticker *Ticker) Close() {
 			runtime.Gosched()
 		}
 	}
+}
+
+// Waiting returns true if the Ticker is currently waiting for the next tick to be available.
+//
+// Note that this is not safe from data races -- even if this returns false, the next read
+// from the channel may block.
+func (ticker *Ticker) Waiting() bool {
+	return atomic.LoadInt32(&ticker.waiting) != 0
 }
 
 // AddTick adds a single tick to the Ticker, retrying with the
@@ -54,7 +63,9 @@ func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint6
 				break
 			}
 		}
+		atomic.StoreInt32(&ticker.waiting, 0)
 		ticker.ch <- struct{}{}
+		atomic.StoreInt32(&ticker.waiting, 1)
 		if counter != nil {
 			atomic.AddUint64(counter, 1)
 		}

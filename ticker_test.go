@@ -95,6 +95,10 @@ func TestAddingTick(t *testing.T) {
 		t.Error("timed out waiting for tick")
 	}
 
+	if !ticker.Waiting() {
+		t.Error("should be waiting")
+	}
+
 	select {
 	case <-ticker.C:
 		t.Error("got an unexpected tick")
