@@ -1,7 +1,6 @@
 package rate
 
 import (
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -82,49 +81,42 @@ func TestNewSubTicker(t *testing.T) {
 	}
 }
 
-func TestAddingTick(t *testing.T) {
-	var counter uint64
+func TestWait(t *testing.T) {
+	var counter, wantcounter uint64
 
 	now := time.Now()
 	maxrate := int32(time.Second / variance * 2)
 	ticker := NewTicker(&maxrate, &counter)
+	shouldwait := time.Second / time.Duration(maxrate)
+
+	ticker.Wait()
 
 	select {
 	case <-ticker.C:
-	case <-time.NewTimer(variance).C:
-		t.Error("timed out waiting for tick")
-	}
-
-	if !ticker.Waiting() {
-		t.Error("should be waiting")
+		wantcounter++
+	case <-time.NewTimer(shouldwait).C:
+		t.Error("tick not immediately available")
 	}
 
 	select {
 	case <-ticker.C:
-		t.Error("got an unexpected tick")
+		wantcounter++
+		t.Error("tick immediately available")
 	default:
 	}
 
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		select {
-		case <-ticker.C:
-		case <-time.NewTimer(variance).C:
-			t.Error("timed out waiting for tick")
-		}
-	}()
-	ticker.AddTick(time.Nanosecond)
-	wg.Wait()
+	go ticker.Wait()
+	ticker.Wait()
+
+	if d := time.Since(now); d < shouldwait {
+		t.Error("did not wait enough", d, shouldwait)
+	}
+
 	if d := time.Since(now); d > variance {
 		t.Errorf("%v > %v", d, variance)
 	}
 	ticker.Close()
-	if counter != 1 {
-		t.Error("counter should be one, not", counter)
-	}
-	if d := time.Since(now); d > variance {
-		t.Errorf("%v > %v", d, variance)
+	if counter != wantcounter {
+		t.Error("counter is", counter, ", but expected", wantcounter)
 	}
 }
