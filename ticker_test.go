@@ -94,6 +94,7 @@ func TestNewSubTicker(t *testing.T) {
 		t.Errorf("%v != %v", x, n)
 	}
 	t1.Close()
+
 	// there can be at most one extra tick to read after t1.Close
 	if _, ok := <-t2.C; ok {
 		if _, ok := <-t2.C; ok {

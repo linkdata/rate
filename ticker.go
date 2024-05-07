@@ -1,34 +1,28 @@
 package rate
 
 import (
-	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
 type Ticker struct {
 	C       <-chan struct{} // sends a struct{}{} at most maxrate times per second
-	tickCh  chan struct{}   // source for C
-	waitCh  chan struct{}   // source for Wait
-	counter *uint64
-	closing int32
-	stopped int32
+	tickCh  chan struct{}   // source for C, closed by runner
+	waitCh  chan struct{}   // source for Wait, closed by runner
+	mu      sync.Mutex      // protects closeCh
+	closeCh chan struct{}   // channel signalling Close() is called
 }
 
 // Close stops the Ticker and frees resources.
 //
 // It is safe to call multiple times or concurrently.
 func (ticker *Ticker) Close() {
-	if atomic.CompareAndSwapInt32(&ticker.closing, 0, 1) {
-		defer close(ticker.tickCh)
-		defer close(ticker.waitCh)
-		for atomic.LoadInt32(&ticker.stopped) != 1 {
-			select {
-			case <-ticker.waitCh:
-			default:
-				runtime.Gosched()
-			}
-		}
+	ticker.mu.Lock()
+	defer ticker.mu.Unlock()
+	if ticker.closeCh != nil {
+		close(ticker.closeCh)
+		ticker.closeCh = nil
 	}
 }
 
@@ -37,10 +31,18 @@ func (ticker *Ticker) Wait() {
 	<-ticker.waitCh
 }
 
+// Closed returns true if the Ticker is closed.
+func (ticker *Ticker) Closed() (yes bool) {
+	ticker.mu.Lock()
+	yes = ticker.closeCh == nil
+	ticker.mu.Unlock()
+	return
+}
+
 func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint64) {
 	defer func() {
-		atomic.StoreInt32(&ticker.stopped, 1)
-		ticker.Close()
+		close(ticker.waitCh)
+		close(ticker.tickCh)
 	}()
 	var rl Limiter
 	var timeCh <-chan time.Time
@@ -49,12 +51,13 @@ func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint6
 	parentCh := parent
 	tickCh := ticker.tickCh
 	waitCh := ticker.waitCh
+	closeCh := ticker.closeCh
 
 	if parent != nil {
 		tickCh = nil
 	}
 
-	for atomic.LoadInt32(&ticker.closing) == 0 {
+	for !ticker.Closed() {
 		select {
 		case tickCh <- struct{}{}:
 			// sent a tick to a consumer
@@ -90,6 +93,8 @@ func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint6
 			}
 			parentCh = nil
 			tickCh = ticker.tickCh
+		case <-closeCh:
+			return
 		}
 	}
 }
@@ -120,7 +125,7 @@ func NewSubTicker(parent <-chan struct{}, maxrate *int32, counter *uint64) *Tick
 	ticker := &Ticker{
 		tickCh:  make(chan struct{}),
 		waitCh:  make(chan struct{}),
-		counter: counter,
+		closeCh: make(chan struct{}),
 	}
 	ticker.C = ticker.tickCh
 	go ticker.run(parent, maxrate, counter)
