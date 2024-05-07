@@ -172,3 +172,28 @@ func TestWaitTwice(t *testing.T) {
 		t.Error("counter is", counter, ", but expected", wantcounter)
 	}
 }
+
+func TestWaitFullRate(t *testing.T) {
+	var counter uint64
+	maxrate := int32(1000)
+	n := int(variance / 2 / (time.Second / time.Duration(maxrate)))
+	if n < 3 {
+		panic(n)
+	}
+	ticker := NewTicker(&maxrate, &counter)
+	now := time.Now()
+	for i := 0; i < n; i++ {
+		ticker.Wait()
+		_, ok := <-ticker.C
+		if !ok {
+			t.Error("ticker channel closed early")
+		}
+	}
+	expectsince := time.Second / time.Duration(maxrate) * time.Duration(n-1) // -1 since first tick is "free"
+	if d := time.Since(now); d < expectsince {
+		t.Errorf("%v < %v", d, expectsince)
+	}
+	if d := time.Since(now); d > variance {
+		t.Errorf("%v > %v", d, variance)
+	}
+}

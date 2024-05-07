@@ -39,7 +39,7 @@ func (ticker *Ticker) Closed() (yes bool) {
 	return
 }
 
-func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint64) {
+func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32, counter *uint64) {
 	defer func() {
 		close(ticker.waitCh)
 		close(ticker.tickCh)
@@ -51,7 +51,6 @@ func (ticker *Ticker) run(parent <-chan struct{}, maxrate *int32, counter *uint6
 	parentCh := parent
 	tickCh := ticker.tickCh
 	waitCh := ticker.waitCh
-	closeCh := ticker.closeCh
 
 	if parent != nil {
 		tickCh = nil
@@ -128,6 +127,6 @@ func NewSubTicker(parent <-chan struct{}, maxrate *int32, counter *uint64) *Tick
 		closeCh: make(chan struct{}),
 	}
 	ticker.C = ticker.tickCh
-	go ticker.run(parent, maxrate, counter)
+	go ticker.run(ticker.closeCh, parent, maxrate, counter)
 	return ticker
 }
