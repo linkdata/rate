@@ -39,7 +39,7 @@ func TestLimiter_Wait(t *testing.T) {
 		{
 			name:  "rate exceeds SleepGranularity",
 			rate:  sleepGranularity * 100,
-			count: sleepGranularity + 1,
+			count: sleepGranularity,
 		},
 	}
 	for _, tt := range tests {

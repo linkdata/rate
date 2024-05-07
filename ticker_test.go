@@ -1,6 +1,7 @@
 package rate
 
 import (
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -10,6 +11,29 @@ func TestTickerClosing(t *testing.T) {
 	maxrate := int32(time.Second / variance * 2)
 	ticker := NewTicker(&maxrate, nil)
 	ticker.Close()
+	select {
+	case _, ok := <-ticker.C:
+		if ok {
+			t.Error("got a tick")
+		}
+	default:
+	}
+}
+
+func TestTickerClosingWithWaiters(t *testing.T) {
+	maxrate := int32(time.Second / variance * 2)
+	ticker := NewTicker(&maxrate, nil)
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ticker.Wait()
+		}()
+	}
+	ticker.Wait()
+	ticker.Close()
+	wg.Wait()
 	select {
 	case _, ok := <-ticker.C:
 		if ok {
@@ -111,6 +135,33 @@ func TestWait(t *testing.T) {
 	if d := time.Since(now); d < shouldwait {
 		t.Error("did not wait enough", d, shouldwait)
 	}
+
+	if d := time.Since(now); d > variance {
+		t.Errorf("%v > %v", d, variance)
+	}
+	ticker.Close()
+	if counter != wantcounter {
+		t.Error("counter is", counter, ", but expected", wantcounter)
+	}
+}
+
+func TestWaitTwice(t *testing.T) {
+	var counter, wantcounter uint64
+
+	now := time.Now()
+	maxrate := int32(time.Second / variance * 2)
+	ticker := NewTicker(&maxrate, &counter)
+
+	var wg sync.WaitGroup
+	wg.Add(1)
+
+	go func() {
+		defer wg.Done()
+		ticker.Wait()
+	}()
+	ticker.Wait()
+
+	wg.Wait()
 
 	if d := time.Since(now); d > variance {
 		t.Errorf("%v > %v", d, variance)
