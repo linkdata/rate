@@ -112,8 +112,11 @@ func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
 			if doWait {
 				ticker.counter++
 				if rateCount == 0 {
+					// emulate some load before first actual measurement
 					ticker.rate++
-					ticker.load++
+					if ticker.load < 1000 {
+						ticker.load++
+					}
 				}
 			} else {
 				ticker.padding--
