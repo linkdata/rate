@@ -38,6 +38,7 @@ func (ticker *Ticker) Close() {
 	}
 	ticker.mu.Lock()
 	ticker.counter -= drained
+	ticker.counter -= int64(ticker.padding)
 	ticker.mu.Unlock()
 }
 
@@ -77,12 +78,18 @@ func (ticker *Ticker) Load() (n int32) {
 	return
 }
 
+func calcLoad(rate int32, maxrate *int32) (load int32) {
+	if maxrate != nil {
+		if mr := atomic.LoadInt32(maxrate); mr > 0 {
+			load = (rate * 1000) / mr
+		}
+	}
+	return
+}
+
 func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
 	defer func() {
 		close(ticker.tickCh)
-		ticker.mu.Lock()
-		ticker.counter -= int64(ticker.padding)
-		ticker.mu.Unlock()
 	}()
 
 	var rl Limiter
@@ -114,9 +121,7 @@ func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
 				if rateCount == 0 {
 					// emulate some load before first actual measurement
 					ticker.rate++
-					if ticker.load < 1000 {
-						ticker.load++
-					}
+					ticker.load = calcLoad(ticker.rate, maxrate)
 				}
 			} else {
 				ticker.padding--
@@ -136,18 +141,11 @@ func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
 			// update current rate and load
 			ticker.mu.Lock()
 			if delta := ticker.counter - rateCount; delta > 0 {
-				var load int32
 				rateCount = ticker.counter
 				elapsed := time.Since(rateWhen)
 				rateWhen = rateWhen.Add(elapsed)
-				rate := int32(time.Duration(delta) * time.Second / elapsed)
-				if maxrate != nil {
-					if mr := atomic.LoadInt32(maxrate); mr > 0 {
-						load = (rate * 1000) / mr
-					}
-				}
-				ticker.rate = rate
-				ticker.load = load
+				ticker.rate = int32(time.Duration(delta) * time.Second / elapsed)
+				ticker.load = calcLoad(ticker.rate, maxrate)
 			}
 			ticker.mu.Unlock()
 		case <-closeCh:

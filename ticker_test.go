@@ -243,3 +243,25 @@ func TestWaitFullRate(t *testing.T) {
 		t.Error("load out of spec", load)
 	}
 }
+
+func TestInitialLoad(t *testing.T) {
+	maxrate := int32(100000)
+	ticker := NewTicker(nil, &maxrate)
+	if load := ticker.Load(); load != 0 {
+		t.Error("load out of spec", load)
+	}
+	go func() {
+		for range ticker.C {
+		}
+	}()
+
+	for ticker.Count() < 1100 {
+	}
+
+	for i := 0; i < 1000; i++ {
+		if load := ticker.Load(); load < 10 || load > 1000 {
+			t.Error("load out of spec", load, ticker.Count(), ticker.Rate())
+		}
+	}
+	ticker.Close()
+}
