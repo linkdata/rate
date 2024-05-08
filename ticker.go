@@ -9,82 +9,119 @@ import (
 type Ticker struct {
 	C       <-chan struct{} // sends a struct{}{} at most maxrate times per second
 	tickCh  chan struct{}   // source for C, closed by runner
-	waitCh  chan struct{}   // source for Wait, closed by runner
-	mu      sync.Mutex      // protects closeCh
+	mu      sync.Mutex      // protects following
 	closeCh chan struct{}   // channel signalling Close() is called
+	counter int64           // counter
+	rate    int32           // current rate
+	load    int32           // current load in permille
+	padding int32           // padding added by Wait
 }
+
+var tickerTimerDuration = time.Second
 
 // Close stops the Ticker and frees resources.
 //
 // It is safe to call multiple times or concurrently.
+// Once Close() returns, no more ticks will be delivered, and if you passed a
+// non-nil ticker counter to NewTicker(), it will be correct.
 func (ticker *Ticker) Close() {
 	ticker.mu.Lock()
-	defer ticker.mu.Unlock()
 	if ticker.closeCh != nil {
 		close(ticker.closeCh)
 		ticker.closeCh = nil
 	}
-}
-
-// Wait delays until the next tick is available.
-func (ticker *Ticker) Wait() {
-	<-ticker.waitCh
-}
-
-// Closed returns true if the Ticker is closed.
-func (ticker *Ticker) Closed() (yes bool) {
+	ticker.mu.Unlock()
+	// wait for tick channel to close
+	var drained int64
+	for range ticker.tickCh {
+		drained++
+	}
 	ticker.mu.Lock()
-	yes = ticker.closeCh == nil
+	ticker.counter -= drained
+	ticker.mu.Unlock()
+}
+
+// Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
+//
+// Typical use case is to launch goroutines that in turn uses the Ticker to rate limit some resource or action,
+// thus limiting the rate of goroutines spawning without impacting the resource use rate.
+func (ticker *Ticker) Wait() {
+	if _, ok := <-ticker.tickCh; ok {
+		ticker.mu.Lock()
+		ticker.padding++
+		ticker.mu.Unlock()
+	}
+}
+
+// Count returns the number of ticks delivered so far.
+func (ticker *Ticker) Count() (n int64) {
+	ticker.mu.Lock()
+	n = ticker.counter
 	ticker.mu.Unlock()
 	return
 }
 
-func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32, counter *uint64) {
-	defer func() {
-		close(ticker.waitCh)
-		close(ticker.tickCh)
-	}()
-	var rl Limiter
-	var timeCh <-chan time.Time
-	timer := time.NewTimer(time.Second)
-	defer timer.Stop()
-	parentCh := parent
-	tickCh := ticker.tickCh
-	waitCh := ticker.waitCh
+// Rate returns the current rate of ticks per second.
+func (ticker *Ticker) Rate() (n int32) {
+	ticker.mu.Lock()
+	n = ticker.rate
+	ticker.mu.Unlock()
+	return
+}
 
+// Load returns the current load in permille.
+func (ticker *Ticker) Load() (n int32) {
+	ticker.mu.Lock()
+	n = ticker.load
+	ticker.mu.Unlock()
+	return
+}
+
+func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
+	defer func() {
+		close(ticker.tickCh)
+		ticker.mu.Lock()
+		ticker.counter -= int64(ticker.padding)
+		ticker.mu.Unlock()
+	}()
+
+	var rl Limiter
+
+	timer := time.NewTimer(tickerTimerDuration)
+	defer timer.Stop()
+
+	parentCh := parent
+	rateWhen := time.Now()
+	rateCount := ticker.counter
+
+	tickCh := ticker.tickCh
 	if parent != nil {
 		tickCh = nil
 	}
 
-	for !ticker.Closed() {
+	for {
 		select {
 		case tickCh <- struct{}{}:
 			// sent a tick to a consumer
-			if counter != nil {
-				atomic.AddUint64(counter, 1)
-			}
-			waitCh = ticker.waitCh
-			timeCh = nil
 			if parent != nil {
 				parentCh = parent
 				tickCh = nil
 			}
-			rl.Wait(maxrate)
-		case waitCh <- struct{}{}:
-			// unblocked a goroutine calling Wait()
-			timeCh = nil
-			if maxrate != nil {
-				if rate := atomic.LoadInt32(maxrate); rate > 0 {
-					timer.Reset(time.Second / time.Duration(rate))
-					waitCh = nil
-					timeCh = timer.C
+			ticker.mu.Lock()
+			doWait := ticker.padding == 0
+			if doWait {
+				ticker.counter++
+				if rateCount == 0 {
+					ticker.rate++
+					ticker.load++
 				}
+			} else {
+				ticker.padding--
 			}
-		case <-timeCh:
-			// enough time has passed since last Wait() unblock
-			// so that we can safely allow one more to unblock
-			waitCh = ticker.waitCh
-			timeCh = nil
+			ticker.mu.Unlock()
+			if doWait {
+				rl.Wait(maxrate)
+			}
 		case _, ok := <-parentCh:
 			// if parentCh is not nil, we require a successful read from it
 			if !ok {
@@ -92,41 +129,48 @@ func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32, count
 			}
 			parentCh = nil
 			tickCh = ticker.tickCh
+		case <-timer.C:
+			// update current rate and load
+			ticker.mu.Lock()
+			if delta := ticker.counter - rateCount; delta > 0 {
+				var load int32
+				rateCount = ticker.counter
+				elapsed := time.Since(rateWhen)
+				rateWhen = rateWhen.Add(elapsed)
+				rate := int32(time.Duration(delta) * time.Second / elapsed)
+				if maxrate != nil {
+					if mr := atomic.LoadInt32(maxrate); mr > 0 {
+						load = (rate * 1000) / mr
+					}
+				}
+				ticker.rate = rate
+				ticker.load = load
+			}
+			ticker.mu.Unlock()
 		case <-closeCh:
 			return
 		}
 	}
 }
 
-// NewTicker returns a Ticker that sends a `struct{}{}`
-// at most `*maxrate` times per second on it's C channel.
+// NewTicker returns a Ticker that reads ticks from a parent channel
+// and sends a `struct{}{}` at most `*maxrate` times per second.
 //
-// If counter is not nil, it is incremented every time a
-// send is successful.
+// The effective max rate is thus the lower of the parent channels rate
+// of sending and `*maxrate`.
+//
+// A nil `parent` channel means tick rate is only limited by `maxrate`.
+// A non-nil parent channel that closes will cause this Ticker to
+// stop sending ticks.
 //
 // A nil `maxrate` or a `*maxrate` of zero or less sends
-// as quickly as possible.
-func NewTicker(maxrate *int32, counter *uint64) *Ticker {
-	return NewSubTicker(nil, maxrate, counter)
-}
-
-// NewSubTicker returns a channel that reads from another struct{}{}
-// channel and then sends a `struct{}{}` at most `*maxrate` times per second,
-// but that cannot exceed the parent tick rate.
-//
-// If counter is not nil, it is incremented every time a
-// send is successful.
-//
-// Use this to make "background" tickers that are less prioritized.
-//
-// The Ticker is closed when the parent channel closes.
-func NewSubTicker(parent <-chan struct{}, maxrate *int32, counter *uint64) *Ticker {
+// as quickly as possible, so only limited by the parent channel.
+func NewTicker(parent <-chan struct{}, maxrate *int32) *Ticker {
 	ticker := &Ticker{
 		tickCh:  make(chan struct{}),
-		waitCh:  make(chan struct{}),
 		closeCh: make(chan struct{}),
 	}
 	ticker.C = ticker.tickCh
-	go ticker.run(ticker.closeCh, parent, maxrate, counter)
+	go ticker.run(ticker.closeCh, parent, maxrate)
 	return ticker
 }
