@@ -59,7 +59,7 @@ func (ticker *Ticker) IsClosed() (yes bool) {
 // Typical use case is to launch goroutines that in turn uses the Ticker to rate limit some resource or action,
 // thus limiting the rate of goroutines spawning without impacting the resource use rate:
 //
-//	if ticker.Load() < 1000 || ticker.Wait() {
+//	if ticker.Load() < 990 || ticker.Wait() {
 //	  go startMoreWork()
 //	}
 func (ticker *Ticker) Wait() (ok bool) {
@@ -94,6 +94,7 @@ func (ticker *Ticker) Rate() (n int32) {
 //
 // Load is rounded up, and is only zero if the rate is zero.
 // If the Ticker has parent Ticker(s), the highest load is returned.
+// Closed Tickers have a load of 1000.
 func (ticker *Ticker) Load() (load int32) {
 	for ticker != nil {
 		ticker.mu.Lock()
@@ -129,6 +130,10 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 	defer func() {
 		close(ticker.tickCh)
 		timer.Stop()
+		ticker.mu.Lock()
+		ticker.load = 1000
+		ticker.rate = 0
+		ticker.mu.Unlock()
 	}()
 
 	var rl Limiter
