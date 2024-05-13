@@ -42,16 +42,27 @@ func (ticker *Ticker) Close() {
 	ticker.mu.Unlock()
 }
 
+// IsClosed returns true if the Ticker is closed.
+func (ticker *Ticker) IsClosed() (yes bool) {
+	ticker.mu.Lock()
+	yes = ticker.closeCh == nil
+	ticker.mu.Unlock()
+	return
+}
+
 // Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
+//
+// Returns true if we waited successfully, or false if the Ticker is closed.
 //
 // Typical use case is to launch goroutines that in turn uses the Ticker to rate limit some resource or action,
 // thus limiting the rate of goroutines spawning without impacting the resource use rate.
-func (ticker *Ticker) Wait() {
-	if _, ok := <-ticker.tickCh; ok {
+func (ticker *Ticker) Wait() (ok bool) {
+	if _, ok = <-ticker.tickCh; ok {
 		ticker.mu.Lock()
 		ticker.padding++
 		ticker.mu.Unlock()
 	}
+	return
 }
 
 // Count returns the number of ticks delivered so far.
@@ -106,7 +117,7 @@ func (ticker *Ticker) run(closeCh, parent <-chan struct{}, maxrate *int32) {
 		tickCh = nil
 	}
 
-	for {
+	for !ticker.IsClosed() {
 		select {
 		case tickCh <- struct{}{}:
 			// sent a tick to a consumer
