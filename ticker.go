@@ -9,13 +9,14 @@ import (
 type Ticker struct {
 	C       <-chan struct{} // sends a struct{}{} at most maxrate times per second
 	tickCh  chan struct{}   // source for C, closed by runner
-	maxrate *int32          // maxrate pointer, or nil
+	parent  *Ticker         // parent Ticker, or nil
+	maxrate *int32          // (atomic) maxrate pointer, or nil
 	mu      sync.Mutex      // protects following
 	closeCh chan struct{}   // channel signalling Close() is called
 	counter int64           // counter
+	padding int32           // padding added by Wait
 	rate    int32           // current rate
 	load    int32           // current load in permille
-	padding int32           // padding added by Wait
 }
 
 var tickerTimerDuration = time.Second
@@ -56,9 +57,16 @@ func (ticker *Ticker) IsClosed() (yes bool) {
 // Returns true if we waited successfully, or false if the Ticker is closed.
 //
 // Typical use case is to launch goroutines that in turn uses the Ticker to rate limit some resource or action,
-// thus limiting the rate of goroutines spawning without impacting the resource use rate.
+// thus limiting the rate of goroutines spawning without impacting the resource use rate:
+//
+//	if ticker.Load() < 1000 || ticker.Wait() {
+//	  go startMoreWork()
+//	}
 func (ticker *Ticker) Wait() (ok bool) {
 	if _, ok = <-ticker.tickCh; ok {
+		for ticker.parent != nil {
+			ticker = ticker.parent
+		}
 		ticker.mu.Lock()
 		ticker.padding++
 		ticker.mu.Unlock()
@@ -82,18 +90,24 @@ func (ticker *Ticker) Rate() (n int32) {
 	return
 }
 
-// Load returns the current load in permille, or -1 if the rate is unlimited.
+// Load returns the current load in permille.
 //
 // Load is rounded up, and is only zero if the rate is zero.
-func (ticker *Ticker) Load() (n int32) {
-	ticker.mu.Lock()
-	n = ticker.load
-	ticker.mu.Unlock()
+// If the Ticker has parent Ticker(s), the highest load is returned.
+func (ticker *Ticker) Load() (load int32) {
+	for ticker != nil {
+		ticker.mu.Lock()
+		if ticker.load > load {
+			load = ticker.load
+		}
+		ticker.mu.Unlock()
+		ticker = ticker.parent
+	}
 	return
 }
 
 func (ticker *Ticker) calcLoadLocked() {
-	load := int32(-1)
+	var load int32
 	if ticker.maxrate != nil {
 		if mr := atomic.LoadInt32(ticker.maxrate); mr > 0 {
 			mr *= 10
@@ -102,7 +116,9 @@ func (ticker *Ticker) calcLoadLocked() {
 				// always round up the load
 				rate += (mr / 1000) - 1
 			}
-			load = (rate * 1000) / mr
+			if load = (rate * 1000) / mr; load > 1000 {
+				load = 1000
+			}
 		}
 	}
 	ticker.load = load
@@ -121,6 +137,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 
 	rateWhen := time.Now()
 	rateCount := ticker.counter
+	needElapsed := (tickerTimerDuration * 10) / 11
 	if parent != nil {
 		parentCh = parent.C
 	} else {
@@ -162,11 +179,12 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 			// update current rate and load
 			ticker.mu.Lock()
 			if delta := ticker.counter - rateCount; delta > 0 {
-				rateCount = ticker.counter
-				elapsed := time.Since(rateWhen)
-				rateWhen = rateWhen.Add(elapsed)
-				ticker.rate = int32(time.Duration(delta) * time.Second / elapsed)
-				ticker.calcLoadLocked()
+				if elapsed := time.Since(rateWhen); elapsed >= needElapsed {
+					rateWhen = rateWhen.Add(elapsed)
+					rateCount = ticker.counter
+					ticker.rate = int32(time.Duration(delta) * time.Second / elapsed)
+					ticker.calcLoadLocked()
+				}
 			}
 			ticker.mu.Unlock()
 		case <-closeCh:
@@ -187,12 +205,15 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 // A nil `maxrate` or a `*maxrate` of zero or less sends
 // as quickly as possible, so only limited by the parent channel.
 func NewTicker(parent *Ticker, maxrate *int32) *Ticker {
-	if maxrate == nil && parent != nil {
-		maxrate = parent.maxrate
+	if parent != nil {
+		if maxrate == nil {
+			maxrate = parent.maxrate
+		}
 	}
 	ticker := &Ticker{
 		tickCh:  make(chan struct{}),
 		closeCh: make(chan struct{}),
+		parent:  parent,
 		maxrate: maxrate,
 	}
 	ticker.C = ticker.tickCh

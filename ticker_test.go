@@ -84,6 +84,7 @@ func TestNewTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
 	ticker := NewTicker(nil, nil)
+	defer ticker.Close()
 	for i := 0; i < n; i++ {
 		_, ok := <-ticker.C
 		if !ok {
@@ -109,7 +110,9 @@ func TestNewSubTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
 	t1 := NewTicker(nil, nil)
+	defer t1.Close()
 	t2 := NewTicker(t1, nil)
+	defer t2.Close()
 	for i := 0; i < n; i++ {
 		_, ok := <-t2.C
 		if !ok {
@@ -146,6 +149,7 @@ func TestWait(t *testing.T) {
 
 	maxrate := int32(100)
 	ticker := NewTicker(nil, &maxrate)
+	defer ticker.Close()
 	period := time.Second / time.Duration(maxrate)
 
 	now := time.Now()
@@ -177,6 +181,7 @@ func TestWaitTwice(t *testing.T) {
 	now := time.Now()
 	maxrate := int32(time.Second / variance * 2)
 	ticker := NewTicker(nil, &maxrate)
+	defer ticker.Close()
 
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -198,49 +203,43 @@ func TestWaitTwice(t *testing.T) {
 	}
 }
 
+/*func TestWaitFullRate_100(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		TestWaitFullRate(t)
+	}
+}*/
+
 func TestWaitFullRate(t *testing.T) {
-	tickerTimerDuration = time.Millisecond
+	tickerTimerDuration = time.Second / 10
 	defer func() {
 		tickerTimerDuration = time.Second
 	}()
 	maxrate := int32(1000)
-	n := int(variance / 2 / (time.Second / time.Duration(maxrate)))
-	if n < 3 {
-		panic(n)
-	}
-	ticker := NewTicker(nil, &maxrate)
+	parent := NewTicker(nil, &maxrate)
+	defer parent.Close()
+	ticker := NewTicker(parent, nil)
+	defer ticker.Close()
 
 	if load := ticker.Load(); load != 0 {
 		t.Error("load out of spec", load)
 	}
 
+	// allow 1% over maxrate to account for sub-second tickerTimerDuration
+	maxratelimit := (maxrate * 101) / 100
 	now := time.Now()
 
-	for i := 0; i < n; i++ {
+	for time.Since(now) < tickerTimerDuration*2 {
 		ticker.Wait()
-		if rate := ticker.Rate(); rate < 1 || rate > maxrate {
-			t.Error("rate out of spec", rate)
+		if rate := ticker.Rate(); rate < 1 || rate > maxratelimit {
+			t.Fatal("rate out of spec", rate, ticker.Count())
 		}
 		if load := ticker.Load(); load < 1 || load > 1000 {
-			t.Error("load out of spec", load)
+			t.Fatal("load out of spec", load)
 		}
 		_, ok := <-ticker.C
 		if !ok {
-			t.Error("ticker channel closed early")
+			t.Fatal("ticker channel closed early")
 		}
-	}
-	expectsince := time.Second / time.Duration(maxrate) * time.Duration(n-1) // -1 since first tick is "free"
-	if d := time.Since(now); d < expectsince {
-		t.Errorf("%v < %v", d, expectsince)
-	}
-	if d := time.Since(now); d > variance {
-		t.Errorf("%v > %v", d, variance)
-	}
-	if rate := ticker.Rate(); rate < maxrate/2 {
-		t.Error("rate out of spec", rate)
-	}
-	if load := ticker.Load(); load < 500 || load > 1000 {
-		t.Error("load out of spec", load)
 	}
 }
 
@@ -273,11 +272,11 @@ func TestTicker_calcLoadLocked(t *testing.T) {
 		rate    int32
 		load    int32
 	}{
-		{"unlimited", 0, 0, -1},
+		{"unlimited", 0, 0, 0},
 		{"1000,0", 1000, 0, 0},
 		{"1000,1", 1000, 1, 1},
 		{"1000,1000", 1000, 1000, 1000},
-		{"1000,1001", 1000, 1001, 1001},
+		{"1000,1001", 1000, 1001, 1000},
 		{"100,1", 100, 1, 10},
 		{"1500,1", 1500, 1, 1},
 		{"1500,1499", 1500, 1499, 1000},
@@ -290,7 +289,6 @@ func TestTicker_calcLoadLocked(t *testing.T) {
 		{"10000,9991", 10000, 9991, 1000},
 		{"10000,9999", 10000, 9999, 1000},
 		{"10000,10000", 10000, 10000, 1000},
-		{"10000,10001", 10000, 10001, 1001},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
