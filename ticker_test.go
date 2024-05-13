@@ -109,7 +109,7 @@ func TestNewSubTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
 	t1 := NewTicker(nil, nil)
-	t2 := NewTicker(t1.C, nil)
+	t2 := NewTicker(t1, nil)
 	for i := 0; i < n; i++ {
 		_, ok := <-t2.C
 		if !ok {
@@ -264,4 +264,44 @@ func TestInitialLoad(t *testing.T) {
 		}
 	}
 	ticker.Close()
+}
+
+func TestTicker_calcLoadLocked(t *testing.T) {
+	tests := []struct {
+		name    string
+		maxrate int32
+		rate    int32
+		load    int32
+	}{
+		{"unlimited", 0, 0, -1},
+		{"1000,0", 1000, 0, 0},
+		{"1000,1", 1000, 1, 1},
+		{"1000,1000", 1000, 1000, 1000},
+		{"1000,1001", 1000, 1001, 1001},
+		{"100,1", 100, 1, 10},
+		{"1500,1", 1500, 1, 1},
+		{"1500,1499", 1500, 1499, 1000},
+		{"2000,1", 2000, 1, 1},
+		{"2000,2", 2000, 2, 1},
+		{"2000,3", 2000, 3, 2},
+		{"2000,1999", 2000, 1999, 1000},
+		{"10000,1", 10000, 1, 1},
+		{"10000,9990", 10000, 9990, 999},
+		{"10000,9991", 10000, 9991, 1000},
+		{"10000,9999", 10000, 9999, 1000},
+		{"10000,10000", 10000, 10000, 1000},
+		{"10000,10001", 10000, 10001, 1001},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ticker := &Ticker{
+				maxrate: &tt.maxrate,
+				rate:    tt.rate,
+			}
+			ticker.calcLoadLocked()
+			if ticker.load != tt.load {
+				t.Error("ticker.load is", ticker.load, "wanted", tt.load)
+			}
+		})
+	}
 }
