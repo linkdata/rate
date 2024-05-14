@@ -90,6 +90,14 @@ func (ticker *Ticker) Rate() (n int32) {
 	return
 }
 
+// MaxRate returns the current max rate of ticks per second.
+func (ticker *Ticker) MaxRate() (n int32) {
+	if ticker.maxrate != nil {
+		n = atomic.LoadInt32(ticker.maxrate)
+	}
+	return
+}
+
 // Load returns the current load in permille.
 //
 // Load is rounded up, and is only zero if the rate is zero.

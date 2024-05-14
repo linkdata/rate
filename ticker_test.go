@@ -150,6 +150,11 @@ func TestWait(t *testing.T) {
 	maxrate := int32(100)
 	ticker := NewTicker(nil, &maxrate)
 	defer ticker.Close()
+
+	if ticker.MaxRate() != maxrate {
+		t.Fatal("incorrect maxrate")
+	}
+
 	period := time.Second / time.Duration(maxrate)
 
 	now := time.Now()
