@@ -308,3 +308,48 @@ func TestTicker_calcLoadLocked(t *testing.T) {
 		})
 	}
 }
+
+func TestWorkerUnlimited(t *testing.T) {
+	maxrate := int32(MaxWorkers)
+	ticker := NewTicker(nil, &maxrate)
+	defer ticker.Close()
+	var wg sync.WaitGroup
+
+	now := time.Now()
+	wg.Add(1)
+	ticker.Worker(2, func() { defer wg.Done() }) // overflows MaxWorkers
+	for time.Since(now) < (variance*8)/10 {
+		wg.Add(1)
+		ticker.Worker(0, func() { defer wg.Done() }) // zero mult means use MaxWorkers
+	}
+	wg.Wait()
+	if d := time.Since(now); d > variance {
+		t.Errorf("%v > %v", d, variance)
+	}
+}
+
+func TestWorkerLimited(t *testing.T) {
+	maxrate := int32(100)
+	ticker := NewTicker(nil, &maxrate)
+	defer ticker.Close()
+	var wg sync.WaitGroup
+
+	now := time.Now()
+	var calls int32
+	for time.Since(now) < variance/2 {
+		wg.Add(1)
+		calls++
+		ticker.Worker(2, func() {
+			defer wg.Done()
+			time.Sleep(variance / 2)
+		})
+	}
+	wg.Wait()
+	wantElapsed := (variance / 2) * time.Duration(calls-(maxrate*2))
+	if d := time.Since(now); d < wantElapsed {
+		t.Errorf("%v < %v", d, wantElapsed)
+	}
+	if d := time.Since(now); d > wantElapsed*2 {
+		t.Errorf("%v > %v", d, wantElapsed*2)
+	}
+}

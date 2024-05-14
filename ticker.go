@@ -11,6 +11,7 @@ type Ticker struct {
 	tickCh  chan struct{}   // source for C, closed by runner
 	parent  *Ticker         // parent Ticker, or nil
 	maxrate *int32          // (atomic) maxrate pointer, or nil
+	workers int32           // (atomic) number of workers started by Go()
 	mu      sync.Mutex      // protects following
 	closeCh chan struct{}   // channel signalling Close() is called
 	counter int64           // counter
@@ -20,6 +21,7 @@ type Ticker struct {
 }
 
 var tickerTimerDuration = time.Second
+var MaxWorkers = int32(10000) // MaxWorkers is the maximum number of concurrent goroutines started by Worker() that is allowed.
 
 // Close stops the Ticker and frees resources.
 //
@@ -52,16 +54,45 @@ func (ticker *Ticker) IsClosed() (yes bool) {
 	return
 }
 
+func (ticker *Ticker) maxWorkers(mult int32) (n int32) {
+	n = ticker.MaxRate() * mult
+	if n < 1 || n > MaxWorkers {
+		n = MaxWorkers
+	}
+	return
+}
+
+// Worker starts f when the current load allows.
+// Returns true if the goroutine was started.
+// Returns false if the ticker is no longer running.
+//
+// It limits the number of goroutines started this way to mult * maxrate,
+// with a hard cap of MaxWorkers. If mult * maxrate is less than one, MaxWorkers is used.
+func (ticker *Ticker) Worker(mult int32, f func()) (ok bool) {
+	if ok = ticker.Load() < 1000 || ticker.Wait(); ok {
+		var sleepTime time.Duration
+		for ok && atomic.LoadInt32(&ticker.workers) > ticker.maxWorkers(mult) {
+			if ok = !ticker.IsClosed(); ok {
+				if sleepTime < time.Millisecond*100 {
+					sleepTime += time.Second / sleepGranularity
+				}
+				time.Sleep(sleepTime)
+			}
+		}
+		if ok {
+			atomic.AddInt32(&ticker.workers, 1)
+			go func() {
+				defer atomic.AddInt32(&ticker.workers, -1)
+				f()
+			}()
+		}
+	}
+	return
+}
+
 // Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
 //
 // Returns true if we waited successfully, or false if the Ticker is closed.
-//
-// Typical use case is to launch goroutines that in turn uses the Ticker to rate limit some resource or action,
-// thus limiting the rate of goroutines spawning without impacting the resource use rate:
-//
-//	if ticker.Load() < 990 || ticker.Wait() {
-//	  go startMoreWork()
-//	}
 func (ticker *Ticker) Wait() (ok bool) {
 	if _, ok = <-ticker.tickCh; ok {
 		for ticker.parent != nil {
