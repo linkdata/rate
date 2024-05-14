@@ -11,7 +11,7 @@ type Ticker struct {
 	tickCh  chan struct{}   // source for C, closed by runner
 	parent  *Ticker         // parent Ticker, or nil
 	maxrate *int32          // (atomic) maxrate pointer, or nil
-	workers int32           // (atomic) number of workers started by Go()
+	workers int32           // (atomic) number of workers started by Worker()
 	mu      sync.Mutex      // protects following
 	closeCh chan struct{}   // channel signalling Close() is called
 	counter int64           // counter
