@@ -18,7 +18,6 @@ func ExampleLimiter_Wait() {
 	zeroElapsed := time.Since(now)
 
 	// This waits at least 1ms.
-	maxrate = 1000
 	now = time.Now()
 	limiter.Wait(&maxrate)
 	someElapsed := time.Since(now)
