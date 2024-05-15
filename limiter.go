@@ -5,8 +5,8 @@ import (
 	"time"
 )
 
-// sleepGranularity 500 implies that the time.Sleep() granularity is at least 2ms
-const sleepGranularity = 500
+// SleepGranularity 500 implies that the time.Sleep() granularity is at least 2ms
+const SleepGranularity = 500
 
 // Limiter provides efficient rate limiting. The zero value is immediately usable.
 //
@@ -32,7 +32,7 @@ func (rl *Limiter) Wait(maxrate *int32) (rate int32) {
 			rl.lastEnded = time.Now()
 			rl.count = 0
 			if newRate > 0 {
-				countMax := newRate / sleepGranularity
+				countMax := newRate / SleepGranularity
 				if countMax < 1 {
 					countMax = 1
 				}

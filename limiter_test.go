@@ -1,15 +1,17 @@
-package rate
+package rate_test
 
 import (
 	"testing"
 	"time"
+
+	"github.com/linkdata/rate"
 )
 
 // maximum duration that times are allowed to exceed expected
 const variance = time.Millisecond * 10
 
 func TestLimiter_WaitNilSpins(t *testing.T) {
-	var rl Limiter
+	var rl rate.Limiter
 
 	now := time.Now()
 	for i := 0; i < 10000; i++ {
@@ -38,13 +40,13 @@ func TestLimiter_Wait(t *testing.T) {
 		},
 		{
 			name:  "rate exceeds SleepGranularity",
-			rate:  sleepGranularity * 100,
-			count: sleepGranularity,
+			rate:  rate.SleepGranularity * 100,
+			count: rate.SleepGranularity,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var rl Limiter
+			var rl rate.Limiter
 			now := time.Now()
 			for i := 0; i < tt.count; i++ {
 				rl.Wait(&tt.rate)
@@ -65,20 +67,20 @@ func TestLimiter_Wait(t *testing.T) {
 }
 
 func TestLimiter_WaitRateChanges(t *testing.T) {
-	var rl Limiter
+	var rl rate.Limiter
 	now := time.Now()
-	rate := int32(sleepGranularity)
+	rte := int32(rate.SleepGranularity)
 	for i := 0; i < 30; i++ {
 		if i == 10 {
-			rate = 0
+			rte = 0
 		}
 		if i == 20 {
-			rate = sleepGranularity
+			rte = rate.SleepGranularity
 		}
-		rl.Wait(&rate)
+		rl.Wait(&rte)
 	}
 	d := time.Since(now)
-	want := (time.Second / sleepGranularity) * 20
+	want := (time.Second / rate.SleepGranularity) * 20
 	if d < want {
 		t.Errorf("%v < %v", d, want)
 	}
