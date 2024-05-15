@@ -253,7 +253,7 @@ func TestInitialLoad(t *testing.T) {
 	ticker.Close()
 }
 
-func TestTicker_calcLoadLocked(t *testing.T) {
+func TestTicker_LoadForRate(t *testing.T) {
 	tests := []struct {
 		name    string
 		maxrate int32
@@ -280,11 +280,9 @@ func TestTicker_calcLoadLocked(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ticker := rate.NewTicker(nil, &tt.maxrate)
-			ticker.Close()
-			ticker.CalculateLoad(tt.rate)
-			if ticker.Load() != tt.load {
-				t.Error("ticker.load is", ticker.Load(), "wanted", tt.load)
+			load := rate.LoadForRate(tt.rate, &tt.maxrate)
+			if load != tt.load {
+				t.Error("load is", load, "wanted", tt.load)
 			}
 		})
 	}
