@@ -9,22 +9,21 @@ import (
 
 func ExampleLimiter_Wait() {
 	var limiter rate.Limiter
-	var now time.Time
 	maxrate := int32(1000)
 
 	// This doesn't wait at all since we haven't waited for anything yet.
-	now = time.Now()
+	now := time.Now()
 	limiter.Wait(&maxrate)
 	noneElapsed := time.Since(now)
 
-	// instead of calling now = time.Now(), which can be slow
+	// Instead of calling now = time.Now(), which can be slow, just add noneElapsed.
 	now = now.Add(noneElapsed)
 
-	// This waits at least 1ms.
+	// This waits at least 1ms because the maxrate is 1000.
 	limiter.Wait(&maxrate)
 	someElapsed := time.Since(now)
 
-	fmt.Println(noneElapsed < someElapsed, someElapsed >= time.Millisecond)
+	fmt.Println(noneElapsed < someElapsed, someElapsed >= time.Second/time.Duration(maxrate))
 	// Output:
 	// true true
 }
