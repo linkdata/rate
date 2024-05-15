@@ -22,10 +22,8 @@ type Limiter struct {
 // Wait sleeps at least long enough to ensure that Wait cannot be
 // called more than `*maxrate` times per second.
 //
-// Returns the current rate, or zero if currently unlimited.
-//
 // A nil `maxrate` or a `*maxrate` of zero or less doesn't wait at all.
-func (rl *Limiter) Wait(maxrate *int32) (rate int32) {
+func (rl *Limiter) Wait(maxrate *int32) {
 	if maxrate != nil {
 		if newRate := atomic.LoadInt32(maxrate); newRate != rl.maxRate {
 			rl.maxRate = newRate
@@ -44,7 +42,6 @@ func (rl *Limiter) Wait(maxrate *int32) (rate int32) {
 			}
 		}
 		if rl.countMax > 0 {
-			rate = rl.maxRate
 			if rl.count++; rl.count >= rl.countMax {
 				rl.count = 0
 				elapsed := time.Since(rl.lastEnded)
@@ -52,10 +49,8 @@ func (rl *Limiter) Wait(maxrate *int32) (rate int32) {
 				if toSleep := rl.sleepDur - elapsed; toSleep > 0 {
 					rl.lastEnded = rl.lastEnded.Add(toSleep)
 					time.Sleep(toSleep)
-					rate = int32(time.Duration(rate) * elapsed / rl.sleepDur)
 				}
 			}
 		}
 	}
-	return
 }
