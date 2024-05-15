@@ -10,9 +10,9 @@ import (
 func ExampleLimiter_Wait() {
 	var limiter rate.Limiter
 	maxrate := int32(1000)
+	now := time.Now()
 
 	// This doesn't wait at all since we haven't waited for anything yet.
-	now := time.Now()
 	limiter.Wait(&maxrate)
 	noneElapsed := time.Since(now)
 
