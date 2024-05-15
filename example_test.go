@@ -15,14 +15,16 @@ func ExampleLimiter_Wait() {
 	// This doesn't wait at all since we haven't waited for anything yet.
 	now = time.Now()
 	limiter.Wait(&maxrate)
-	zeroElapsed := time.Since(now)
+	noneElapsed := time.Since(now)
+
+	// instead of calling now = time.Now(), which can be slow
+	now = now.Add(noneElapsed)
 
 	// This waits at least 1ms.
-	now = time.Now()
 	limiter.Wait(&maxrate)
 	someElapsed := time.Since(now)
 
-	fmt.Println(zeroElapsed < someElapsed, someElapsed >= time.Millisecond)
+	fmt.Println(noneElapsed < someElapsed, someElapsed >= time.Millisecond)
 	// Output:
 	// true true
 }
