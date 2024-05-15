@@ -7,21 +7,24 @@ import (
 )
 
 type Ticker struct {
-	C       <-chan struct{} // sends a struct{}{} at most maxrate times per second
-	tickCh  chan struct{}   // source for C, closed by runner
-	parent  *Ticker         // parent Ticker, or nil
-	maxrate *int32          // (atomic) maxrate pointer, or nil
-	workers int32           // (atomic) number of workers started by Worker()
-	mu      sync.Mutex      // protects following
-	closeCh chan struct{}   // channel signalling Close() is called
-	counter int64           // counter
-	padding int32           // padding added by Wait
-	rate    int32           // current rate
-	load    int32           // current load in permille
+	C           <-chan struct{} // Sends a struct{}{} at most maxrate times per second
+	WorkerMax   int32           // Maximum number of workers that may be started with Worker(), default 10000
+	WorkerLoad  int32           // Load at which we stop starting new workers, default 1000
+	WorkerRatio int32           // Ratio of max workers to max rate, default 1
+	tickCh      chan struct{}   // source for C, closed by runner
+	parent      *Ticker         // parent Ticker, or nil
+	maxrate     *int32          // (atomic) maxrate pointer, or nil
+	workers     int32           // (atomic) number of workers started by Worker()
+	mu          sync.Mutex      // protects following
+	closeCh     chan struct{}   // channel signalling Close() is called
+	counter     int64           // counter
+	padding     int32           // padding added by Wait
+	rate        int32           // current rate
+	load        int32           // current load in permille
 }
 
-var tickerTimerDuration = time.Second
-var MaxWorkers = int32(10000) // MaxWorkers is the maximum number of concurrent goroutines started by Worker() that is allowed.
+// TickerTimerInterval is how often a Ticker updates it's rate and load metrics.
+var TickerTimerInterval = time.Second
 
 // Close stops the Ticker and frees resources.
 //
@@ -35,11 +38,7 @@ func (ticker *Ticker) Close() {
 		ticker.closeCh = nil
 	}
 	ticker.mu.Unlock()
-	// wait for tick channel to close
-	var drained int64
-	for range ticker.tickCh {
-		drained++
-	}
+	drained := ticker.Drain()
 	ticker.mu.Lock()
 	ticker.counter -= drained
 	ticker.counter -= int64(ticker.padding)
@@ -54,10 +53,18 @@ func (ticker *Ticker) IsClosed() (yes bool) {
 	return
 }
 
-func (ticker *Ticker) maxWorkers(mult int32) (n int32) {
-	n = ticker.MaxRate() * mult
-	if n < 1 || n > MaxWorkers {
-		n = MaxWorkers
+// Drain consumes ticks from the Ticker until it is closed. Returns the number of ticks drained.
+func (ticker *Ticker) Drain() (drained int64) {
+	for range ticker.tickCh {
+		drained++
+	}
+	return
+}
+
+func (ticker *Ticker) maxWorkers() (n int32) {
+	n = ticker.MaxRate() * ticker.WorkerRatio
+	if n < 1 || n > ticker.WorkerMax {
+		n = ticker.WorkerMax
 	}
 	return
 }
@@ -66,15 +73,16 @@ func (ticker *Ticker) maxWorkers(mult int32) (n int32) {
 // Returns true if the goroutine was started.
 // Returns false if the ticker is no longer running.
 //
-// It limits the number of goroutines started this way to mult * maxrate,
-// with a hard cap of MaxWorkers. If mult * maxrate is less than one, MaxWorkers is used.
-func (ticker *Ticker) Worker(mult int32, f func()) (ok bool) {
-	if ok = ticker.Load() < 1000 || ticker.Wait(); ok {
+// It limits the number of goroutines started this way to MaxRate() * WorkerRatio,
+// with a hard cap of WorkerMax. If MaxRate() * WorkerRatio is less than one,
+// WorkerMax is used.
+func (ticker *Ticker) Worker(f func()) (ok bool) {
+	if ok = ticker.Load() < ticker.WorkerLoad || ticker.Wait(); ok {
 		var sleepTime time.Duration
-		for ok && atomic.LoadInt32(&ticker.workers) > ticker.maxWorkers(mult) {
+		for ok && atomic.LoadInt32(&ticker.workers) > ticker.maxWorkers() {
 			if ok = !ticker.IsClosed(); ok {
 				if sleepTime < time.Millisecond*100 {
-					sleepTime += time.Second / sleepGranularity
+					sleepTime += time.Second / SleepGranularity
 				}
 				time.Sleep(sleepTime)
 			}
@@ -146,12 +154,14 @@ func (ticker *Ticker) Load() (load int32) {
 	return
 }
 
-func (ticker *Ticker) calcLoadLocked() {
+// CalculateLoad sets the current rate and calculates the load.
+func (ticker *Ticker) CalculateLoad(rate int32) {
 	var load int32
+	ticker.rate = rate
 	if ticker.maxrate != nil {
 		if mr := atomic.LoadInt32(ticker.maxrate); mr > 0 {
 			mr *= 10
-			rate := ticker.rate * 10
+			rate *= 10
 			if mr > 10000 {
 				// always round up the load
 				rate += (mr / 1000) - 1
@@ -165,7 +175,7 @@ func (ticker *Ticker) calcLoadLocked() {
 }
 
 func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
-	timer := time.NewTimer(tickerTimerDuration)
+	timer := time.NewTimer(TickerTimerInterval)
 	defer func() {
 		close(ticker.tickCh)
 		timer.Stop()
@@ -181,7 +191,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 
 	rateWhen := time.Now()
 	rateCount := ticker.counter
-	needElapsed := (tickerTimerDuration * 10) / 11
+	needElapsed := (TickerTimerInterval * 10) / 11
 	if parent != nil {
 		parentCh = parent.C
 	} else {
@@ -202,8 +212,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 				ticker.counter++
 				if rateCount == 0 {
 					// emulate some load before first actual measurement
-					ticker.rate++
-					ticker.calcLoadLocked()
+					ticker.CalculateLoad(ticker.rate + 1)
 				}
 			} else {
 				ticker.padding--
@@ -226,8 +235,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 				if elapsed := time.Since(rateWhen); elapsed >= needElapsed {
 					rateWhen = rateWhen.Add(elapsed)
 					rateCount = ticker.counter
-					ticker.rate = int32(time.Duration(delta) * time.Second / elapsed)
-					ticker.calcLoadLocked()
+					ticker.CalculateLoad(int32(time.Duration(delta) * time.Second / elapsed))
 				}
 			}
 			ticker.mu.Unlock()
@@ -255,10 +263,13 @@ func NewTicker(parent *Ticker, maxrate *int32) *Ticker {
 		}
 	}
 	ticker := &Ticker{
-		tickCh:  make(chan struct{}),
-		closeCh: make(chan struct{}),
-		parent:  parent,
-		maxrate: maxrate,
+		WorkerMax:   10000,
+		WorkerLoad:  1000,
+		WorkerRatio: 1,
+		tickCh:      make(chan struct{}),
+		closeCh:     make(chan struct{}),
+		parent:      parent,
+		maxrate:     maxrate,
 	}
 	ticker.C = ticker.tickCh
 	go ticker.run(ticker.closeCh, parent)

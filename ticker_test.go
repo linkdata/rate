@@ -1,14 +1,16 @@
-package rate
+package rate_test
 
 import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/linkdata/rate"
 )
 
 func TestTickerClosing(t *testing.T) {
 	var wantcounter int64
-	ticker := NewTicker(nil, nil)
+	ticker := rate.NewTicker(nil, nil)
 	ticker.Close()
 	select {
 	case _, ok := <-ticker.C:
@@ -22,44 +24,31 @@ func TestTickerClosing(t *testing.T) {
 	}
 }
 
-func TestTickerClosingDrainsTicks(t *testing.T) {
-	var wantcounter int64
-	ticker := NewTicker(nil, nil)
-	ticker.Close()
+func TestTickerDrain(t *testing.T) {
+	var drained int64
+	var n int
 
-	// resurrect
-	ticker.tickCh = make(chan struct{})
-	ticker.closeCh = make(chan struct{})
-
-	go func() {
-		defer close(ticker.tickCh)
-		var done bool
-		for !done {
-			ticker.tickCh <- struct{}{}
-			ticker.mu.Lock()
-			ticker.counter++
-			done = ticker.counter > 10
-			ticker.mu.Unlock()
-		}
-	}()
-
-	ticker.Close()
-
-	select {
-	case _, ok := <-ticker.C:
-		if ok {
-			t.Error("got a tick")
-		}
-	default:
+	for drained == 0 && n < 10 {
+		var wg sync.WaitGroup
+		ticker := rate.NewTicker(nil, nil)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			drained = ticker.Drain()
+		}()
+		time.Sleep(time.Millisecond)
+		ticker.Close()
+		wg.Wait()
+		n++
 	}
-	if counter := ticker.Count(); counter != wantcounter {
-		t.Error("counter is", counter, ", but expected", wantcounter)
+	if drained == 0 {
+		t.Error("failed to drain ticks")
 	}
 }
 
 func TestTickerClosingWithWaiters(t *testing.T) {
 	maxrate := int32(time.Second / variance * 2)
-	ticker := NewTicker(nil, &maxrate)
+	ticker := rate.NewTicker(nil, &maxrate)
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
@@ -83,7 +72,7 @@ func TestTickerClosingWithWaiters(t *testing.T) {
 func TestNewTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
-	ticker := NewTicker(nil, nil)
+	ticker := rate.NewTicker(nil, nil)
 	defer ticker.Close()
 	for i := 0; i < n; i++ {
 		_, ok := <-ticker.C
@@ -109,9 +98,9 @@ func TestNewTicker(t *testing.T) {
 func TestNewSubTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
-	t1 := NewTicker(nil, nil)
+	t1 := rate.NewTicker(nil, nil)
 	defer t1.Close()
-	t2 := NewTicker(t1, nil)
+	t2 := rate.NewTicker(t1, nil)
 	defer t2.Close()
 	for i := 0; i < n; i++ {
 		_, ok := <-t2.C
@@ -148,7 +137,7 @@ func TestWait(t *testing.T) {
 	var wantcounter int64
 
 	maxrate := int32(100)
-	ticker := NewTicker(nil, &maxrate)
+	ticker := rate.NewTicker(nil, &maxrate)
 	defer ticker.Close()
 
 	if ticker.MaxRate() != maxrate {
@@ -185,7 +174,7 @@ func TestWaitTwice(t *testing.T) {
 
 	now := time.Now()
 	maxrate := int32(time.Second / variance * 2)
-	ticker := NewTicker(nil, &maxrate)
+	ticker := rate.NewTicker(nil, &maxrate)
 	defer ticker.Close()
 
 	var wg sync.WaitGroup
@@ -208,21 +197,15 @@ func TestWaitTwice(t *testing.T) {
 	}
 }
 
-/*func TestWaitFullRate_100(t *testing.T) {
-	for i := 0; i < 100; i++ {
-		TestWaitFullRate(t)
-	}
-}*/
-
 func TestWaitFullRate(t *testing.T) {
-	tickerTimerDuration = time.Second / 10
+	rate.TickerTimerInterval = time.Second / 10
 	defer func() {
-		tickerTimerDuration = time.Second
+		rate.TickerTimerInterval = time.Second
 	}()
 	maxrate := int32(1000)
-	parent := NewTicker(nil, &maxrate)
+	parent := rate.NewTicker(nil, &maxrate)
 	defer parent.Close()
-	ticker := NewTicker(parent, nil)
+	ticker := rate.NewTicker(parent, nil)
 	defer ticker.Close()
 
 	if load := ticker.Load(); load != 0 {
@@ -233,7 +216,7 @@ func TestWaitFullRate(t *testing.T) {
 	maxratelimit := (maxrate * 101) / 100
 	now := time.Now()
 
-	for time.Since(now) < tickerTimerDuration*2 {
+	for time.Since(now) < rate.TickerTimerInterval*2 {
 		ticker.Wait()
 		if rate := ticker.Rate(); rate < 1 || rate > maxratelimit {
 			t.Fatal("rate out of spec", rate, ticker.Count())
@@ -250,7 +233,7 @@ func TestWaitFullRate(t *testing.T) {
 
 func TestInitialLoad(t *testing.T) {
 	maxrate := int32(100000)
-	ticker := NewTicker(nil, &maxrate)
+	ticker := rate.NewTicker(nil, &maxrate)
 	if load := ticker.Load(); load != 0 {
 		t.Error("load out of spec", load)
 	}
@@ -297,30 +280,33 @@ func TestTicker_calcLoadLocked(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ticker := &Ticker{
-				maxrate: &tt.maxrate,
-				rate:    tt.rate,
-			}
-			ticker.calcLoadLocked()
-			if ticker.load != tt.load {
-				t.Error("ticker.load is", ticker.load, "wanted", tt.load)
+			ticker := rate.NewTicker(nil, &tt.maxrate)
+			ticker.Close()
+			ticker.CalculateLoad(tt.rate)
+			if ticker.Load() != tt.load {
+				t.Error("ticker.load is", ticker.Load(), "wanted", tt.load)
 			}
 		})
 	}
 }
 
 func TestWorkerUnlimited(t *testing.T) {
-	maxrate := int32(MaxWorkers)
-	ticker := NewTicker(nil, &maxrate)
-	defer ticker.Close()
 	var wg sync.WaitGroup
+	var maxrate int32
 
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	maxrate = ticker.WorkerMax
 	now := time.Now()
+
 	wg.Add(1)
-	ticker.Worker(2, func() { defer wg.Done() }) // overflows MaxWorkers
+	ticker.WorkerRatio = 2 // overflows WorkerMax
+	ticker.Worker(func() { defer wg.Done() })
+	ticker.WorkerRatio = 0 // zero ratio means use WorkerMax
 	for time.Since(now) < (variance*8)/10 {
 		wg.Add(1)
-		ticker.Worker(0, func() { defer wg.Done() }) // zero mult means use MaxWorkers
+		ticker.Worker(func() { defer wg.Done() })
 	}
 	wg.Wait()
 	if d := time.Since(now); d > variance {
@@ -330,8 +316,9 @@ func TestWorkerUnlimited(t *testing.T) {
 
 func TestWorkerLimited(t *testing.T) {
 	maxrate := int32(100)
-	ticker := NewTicker(nil, &maxrate)
+	ticker := rate.NewTicker(nil, &maxrate)
 	defer ticker.Close()
+	ticker.WorkerRatio = 2
 	var wg sync.WaitGroup
 
 	now := time.Now()
@@ -339,7 +326,7 @@ func TestWorkerLimited(t *testing.T) {
 	for time.Since(now) < variance/2 {
 		wg.Add(1)
 		calls++
-		ticker.Worker(2, func() {
+		ticker.Worker(func() {
 			defer wg.Done()
 			time.Sleep(variance / 2)
 		})
