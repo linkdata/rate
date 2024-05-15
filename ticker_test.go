@@ -26,7 +26,7 @@ func TestTickerClosing(t *testing.T) {
 
 func TestTickerDrain(t *testing.T) {
 	var drained int64
-	var n int
+	n := 1
 
 	for drained == 0 && n < 10 {
 		var wg sync.WaitGroup
@@ -36,7 +36,7 @@ func TestTickerDrain(t *testing.T) {
 			defer wg.Done()
 			drained = ticker.Drain()
 		}()
-		time.Sleep(time.Millisecond)
+		time.Sleep(time.Millisecond * time.Duration(n))
 		ticker.Close()
 		wg.Wait()
 		n++
