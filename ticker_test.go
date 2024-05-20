@@ -307,6 +307,9 @@ func TestWorkerUnlimited(t *testing.T) {
 		ticker.Worker(func() { defer wg.Done() })
 	}
 	wg.Wait()
+	if n := ticker.WorkerCount(); n != 0 {
+		t.Error(n)
+	}
 	if d := time.Since(now); d > variance {
 		t.Errorf("%v > %v", d, variance)
 	}

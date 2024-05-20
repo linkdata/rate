@@ -121,6 +121,11 @@ func (ticker *Ticker) Count() (n int64) {
 	return
 }
 
+// WorkerCount returns the number of currently running workers.
+func (ticker *Ticker) WorkerCount() int32 {
+	return atomic.LoadInt32(&ticker.workers)
+}
+
 // Rate returns the current rate of ticks per second.
 func (ticker *Ticker) Rate() (n int32) {
 	ticker.mu.Lock()
