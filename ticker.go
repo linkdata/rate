@@ -239,7 +239,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 				if elapsed := time.Since(rateWhen); elapsed >= needElapsed {
 					rateWhen = rateWhen.Add(elapsed)
 					rateCount = ticker.counter
-					ticker.rate = int32(time.Duration(delta) * time.Second / elapsed)
+					ticker.rate = int32(time.Duration(delta) * time.Second / elapsed) // #nosec G115
 					ticker.load = LoadForRate(ticker.rate, ticker.maxrate)
 
 				}
