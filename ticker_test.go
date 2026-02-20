@@ -231,6 +231,76 @@ func TestWaitFullRate(t *testing.T) {
 	}
 }
 
+func TestTickerRateTracksRateChanges(t *testing.T) {
+	rate.TickerTimerInterval = time.Millisecond * 40
+	defer func() {
+		rate.TickerTimerInterval = time.Second
+	}()
+
+	maxrate := int32(1500)
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	now := time.Now()
+	for time.Since(now) < rate.TickerTimerInterval*3 {
+		_, ok := <-ticker.C
+		if !ok {
+			t.Fatal("ticker channel closed early")
+		}
+	}
+
+	highRate := ticker.Rate()
+	if highRate < 500 {
+		t.Fatal("failed to observe high rate", highRate)
+	}
+
+	maxrate = 100
+	now = time.Now()
+	for time.Since(now) < rate.TickerTimerInterval*6 {
+		_, ok := <-ticker.C
+		if !ok {
+			t.Fatal("ticker channel closed early")
+		}
+	}
+
+	lowRate := ticker.Rate()
+	if lowRate > 300 {
+		t.Fatalf("rate did not track maxrate change, high=%d low=%d", highRate, lowRate)
+	}
+}
+
+func TestTickerRateDropsToZeroWhenIdle(t *testing.T) {
+	rate.TickerTimerInterval = time.Millisecond * 40
+	defer func() {
+		rate.TickerTimerInterval = time.Second
+	}()
+
+	maxrate := int32(1000)
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	now := time.Now()
+	for time.Since(now) < rate.TickerTimerInterval*3 {
+		_, ok := <-ticker.C
+		if !ok {
+			t.Fatal("ticker channel closed early")
+		}
+	}
+
+	if highRate := ticker.Rate(); highRate < 200 {
+		t.Fatal("failed to observe non-idle rate", highRate)
+	}
+
+	time.Sleep(rate.TickerTimerInterval * 4)
+
+	if got := ticker.Rate(); got != 0 {
+		t.Fatalf("expected idle rate to reach zero, got %d", got)
+	}
+	if got := ticker.Load(); got != 0 {
+		t.Fatalf("expected idle load to reach zero, got %d", got)
+	}
+}
+
 func TestInitialLoad(t *testing.T) {
 	maxrate := int32(100000)
 	ticker := rate.NewTicker(nil, &maxrate)

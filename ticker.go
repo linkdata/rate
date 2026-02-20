@@ -24,6 +24,7 @@ type Ticker struct {
 }
 
 // TickerTimerInterval is how often a Ticker updates it's rate and load metrics.
+// Updating it while Tickers are running implies a (harmless) data race.
 var TickerTimerInterval = time.Second
 
 // Close stops the Ticker and frees resources.
@@ -235,16 +236,20 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 		case <-timer.C:
 			// update current rate and load
 			ticker.mu.Lock()
-			if delta := ticker.counter - rateCount; delta > 0 {
-				if elapsed := time.Since(rateWhen); elapsed >= needElapsed {
-					rateWhen = rateWhen.Add(elapsed)
-					rateCount = ticker.counter
+			if elapsed := time.Since(rateWhen); elapsed >= needElapsed {
+				delta := ticker.counter - rateCount
+				rateWhen = rateWhen.Add(elapsed)
+				rateCount = ticker.counter
+				if delta > 0 {
 					ticker.rate = int32(time.Duration(delta) * time.Second / elapsed) // #nosec G115
 					ticker.load = LoadForRate(ticker.rate, ticker.maxrate)
-
+				} else {
+					ticker.rate = 0
+					ticker.load = 0
 				}
 			}
 			ticker.mu.Unlock()
+			timer.Reset(TickerTimerInterval)
 		case <-closeCh:
 			return
 		}
