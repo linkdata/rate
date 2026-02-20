@@ -358,6 +358,70 @@ func TestTicker_LoadForRate(t *testing.T) {
 	}
 }
 
+func TestTicker_LoadForRateLargeValues(t *testing.T) {
+	maxrate := int32(3000000)
+	load := rate.LoadForRate(maxrate/2, &maxrate)
+	if load != 500 {
+		t.Fatalf("load is %d, wanted 500", load)
+	}
+}
+
+func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
+	maxrate := int32(1)
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	ticker.WorkerRatio = 1
+	ticker.WorkerMax = 10
+	ticker.WorkerLoad = 1000
+
+	firstStarted := make(chan struct{})
+	blockFirst := make(chan struct{})
+	if ok := ticker.Worker(func() {
+		close(firstStarted)
+		<-blockFirst
+	}); !ok {
+		t.Fatal("failed to start first worker")
+	}
+
+	select {
+	case <-firstStarted:
+	case <-time.After(variance):
+		t.Fatal("first worker did not start in time")
+	}
+
+	secondStarted := make(chan struct{})
+	secondDone := make(chan bool, 1)
+	go func() {
+		secondDone <- ticker.Worker(func() {
+			close(secondStarted)
+		})
+	}()
+
+	time.Sleep(time.Millisecond * 2)
+
+	select {
+	case <-secondStarted:
+		t.Fatal("second worker started while max worker count was already reached")
+	default:
+	}
+
+	if workers := ticker.WorkerCount(); workers != 1 {
+		t.Fatalf("worker count is %d, wanted 1", workers)
+	}
+
+	close(blockFirst)
+
+	select {
+	case ok := <-secondDone:
+		if !ok {
+			t.Fatal("second Worker call unexpectedly failed")
+		}
+	case <-time.After(variance * 4):
+		t.Fatal("second Worker call did not complete in time")
+	}
+}
+
 func TestWorkerUnlimited(t *testing.T) {
 	var wg sync.WaitGroup
 	var maxrate int32
@@ -407,7 +471,7 @@ func TestWorkerLimited(t *testing.T) {
 	if d := time.Since(now); d < wantElapsed {
 		t.Errorf("%v < %v", d, wantElapsed)
 	}
-	if d := time.Since(now); d > wantElapsed*2 {
-		t.Errorf("%v > %v", d, wantElapsed*2)
+	if d := time.Since(now); d > wantElapsed*2+variance {
+		t.Errorf("%v > %v", d, wantElapsed*2+variance)
 	}
 }

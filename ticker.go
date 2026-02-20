@@ -80,20 +80,25 @@ func (ticker *Ticker) maxWorkers() (n int32) {
 func (ticker *Ticker) Worker(f func()) (ok bool) {
 	if ok = ticker.Load() < ticker.WorkerLoad || ticker.Wait(); ok {
 		var sleepTime time.Duration
-		for ok && atomic.LoadInt32(&ticker.workers) > ticker.maxWorkers() {
-			if ok = !ticker.IsClosed(); ok {
-				if sleepTime < time.Millisecond*100 {
-					sleepTime += time.Second / SleepGranularity
+		for ok {
+			workers := atomic.LoadInt32(&ticker.workers)
+			maxWorkers := ticker.maxWorkers()
+			if workers < maxWorkers {
+				if atomic.CompareAndSwapInt32(&ticker.workers, workers, workers+1) {
+					go func() {
+						defer atomic.AddInt32(&ticker.workers, -1)
+						f()
+					}()
+					break
 				}
-				time.Sleep(sleepTime)
+			} else {
+				if ok = !ticker.IsClosed(); ok {
+					if sleepTime < time.Millisecond*100 {
+						sleepTime += time.Second / SleepGranularity
+					}
+					time.Sleep(sleepTime)
+				}
 			}
-		}
-		if ok {
-			atomic.AddInt32(&ticker.workers, 1)
-			go func() {
-				defer atomic.AddInt32(&ticker.workers, -1)
-				f()
-			}()
 		}
 	}
 	return
@@ -164,13 +169,16 @@ func (ticker *Ticker) Load() (load int32) {
 func LoadForRate(rate int32, maxrate *int32) (load int32) {
 	if maxrate != nil {
 		if mr := atomic.LoadInt32(maxrate); mr > 0 {
-			mr *= 10
-			rate *= 10
-			if mr > 10000 {
+			// Use int64 arithmetic to avoid overflow at high rates.
+			r64 := int64(rate) * 10
+			mr64 := int64(mr) * 10
+			if mr64 > 10000 {
 				// always round up the load
-				rate += (mr / 1000) - 1
+				r64 += (mr64 / 1000) - 1
 			}
-			if load = (rate * 1000) / mr; load > 1000 {
+			load64 := (r64 * 1000) / mr64
+			load = int32(load64)
+			if load > 1000 {
 				load = 1000
 			}
 		}
