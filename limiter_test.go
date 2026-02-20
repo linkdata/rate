@@ -88,3 +88,4 @@ func TestLimiter_WaitRateChanges(t *testing.T) {
 		t.Errorf("%v > %v", d, want+variance)
 	}
 }
+

@@ -35,7 +35,7 @@ func (rl *Limiter) Wait(maxrate *int32) {
 					countMax = 1
 				}
 				rl.countMax = countMax
-				rl.sleepDur = time.Second / time.Duration(newRate/rl.countMax)
+				rl.sleepDur = time.Second * time.Duration(rl.countMax) / time.Duration(newRate)
 			} else {
 				rl.countMax = 0
 				rl.sleepDur = 0
