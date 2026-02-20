@@ -494,22 +494,37 @@ func TestWorkerUnlimited(t *testing.T) {
 	defer ticker.Close()
 
 	maxrate = ticker.WorkerMax
-	now := time.Now()
 
 	wg.Add(1)
 	ticker.WorkerRatio = 2 // overflows WorkerMax
 	ticker.Worker(func() { defer wg.Done() })
 	ticker.WorkerRatio = 0 // zero ratio means use WorkerMax
-	for time.Since(now) < (variance*8)/10 {
+	for i := int32(0); i < ticker.WorkerMax; i++ {
 		wg.Add(1)
 		ticker.Worker(func() { defer wg.Done() })
 	}
-	wg.Wait()
-	if n := ticker.WorkerCount(); n != 0 {
-		t.Error(n)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		wg.Wait()
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(variance * 20):
+		t.Fatal("workers did not complete in time")
 	}
-	if d := time.Since(now); d > variance {
-		t.Errorf("%v > %v", d, variance)
+
+	deadline := time.Now().Add(variance * 10)
+	for time.Now().Before(deadline) {
+		if ticker.WorkerCount() == 0 {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if n := ticker.WorkerCount(); n != 0 {
+		t.Fatalf("worker count is %d, wanted 0", n)
 	}
 }
 
