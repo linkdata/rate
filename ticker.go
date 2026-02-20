@@ -43,6 +43,7 @@ func (ticker *Ticker) Close() {
 	ticker.mu.Lock()
 	ticker.counter -= drained
 	ticker.counter -= int64(ticker.padding)
+	ticker.padding = 0
 	ticker.mu.Unlock()
 }
 

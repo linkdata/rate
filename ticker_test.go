@@ -69,6 +69,25 @@ func TestTickerClosingWithWaiters(t *testing.T) {
 	}
 }
 
+func TestTickerClosingIsIdempotentAfterWait(t *testing.T) {
+	maxrate := int32(100000)
+	ticker := rate.NewTicker(nil, &maxrate)
+
+	if ok := ticker.Wait(); !ok {
+		t.Fatal("ticker closed early")
+	}
+
+	ticker.Close()
+	firstCount := ticker.Count()
+
+	ticker.Close()
+	secondCount := ticker.Count()
+
+	if secondCount != firstCount {
+		t.Fatalf("counter changed after repeated Close: first=%d second=%d", firstCount, secondCount)
+	}
+}
+
 func TestNewTicker(t *testing.T) {
 	const n = 100
 	now := time.Now()
