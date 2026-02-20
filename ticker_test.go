@@ -393,6 +393,37 @@ func TestTicker_LoadForRateNegativeRateClamped(t *testing.T) {
 	}
 }
 
+func TestTicker_LoadForRateRoundsUp(t *testing.T) {
+	// LoadForRate documents "Load is rounded up, and is only zero if the rate is zero."
+	// Verify ceiling division for various maxrate values.
+	tests := []struct {
+		name    string
+		maxrate int32
+		rate    int32
+		load    int32
+	}{
+		// Small maxrate: rounding correction was not applied
+		{"3,1", 3, 1, 334},     // ceil(1000/3) = 334, was 333
+		{"3,2", 3, 2, 667},     // ceil(2000/3) = 667, was 666
+		{"7,1", 7, 1, 143},     // ceil(1000/7) = 143, was 142
+		{"7,3", 7, 3, 429},     // ceil(3000/7) = 429, was 428
+		{"11,1", 11, 1, 91},    // ceil(1000/11) = 91, was 90
+		{"999,1", 999, 1, 2},   // ceil(1000/999) = 2, was 1
+		{"999,998", 999, 998, 999}, // ceil(998000/999) = 999, was 998
+
+		// Large maxrate: rounding correction was off by 1
+		{"10001,9001", 10001, 9001, 901}, // ceil(9001000/10001) = 901, was 900
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			load := rate.LoadForRate(tt.rate, &tt.maxrate)
+			if load != tt.load {
+				t.Errorf("LoadForRate(%d, %d) = %d, want %d", tt.rate, tt.maxrate, load, tt.load)
+			}
+		})
+	}
+}
+
 func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 	maxrate := int32(1)
 	ticker := rate.NewTicker(nil, &maxrate)

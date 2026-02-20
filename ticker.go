@@ -172,13 +172,10 @@ func LoadForRate(rate int32, maxrate *int32) (load int32) {
 	if maxrate != nil {
 		if mr := atomic.LoadInt32(maxrate); mr > 0 {
 			// Use int64 arithmetic to avoid overflow at high rates.
-			r64 := int64(rate) * 10
-			mr64 := int64(mr) * 10
-			if mr64 > 10000 {
-				// always round up the load
-				r64 += (mr64 / 1000) - 1
-			}
-			load64 := (r64 * 1000) / mr64
+			// Ceiling division: ceil(rate * 1000 / mr) = (rate * 1000 + mr - 1) / mr
+			r64 := int64(rate)
+			mr64 := int64(mr)
+			load64 := (r64*1000 + mr64 - 1) / mr64
 			load = max(0, min(1000, int32(load64)))
 		}
 	}
