@@ -486,6 +486,30 @@ func TestWorkerTreatsNonPositiveWorkerMaxAsOne(t *testing.T) {
 	}
 }
 
+func TestWorkerReturnsFalseAfterClose(t *testing.T) {
+	maxrate := int32(1000)
+	ticker := rate.NewTicker(nil, &maxrate)
+	ticker.Close()
+
+	// Closed tickers report a load of 1000; with a higher WorkerLoad this used
+	// to bypass Wait() and incorrectly start a worker.
+	ticker.WorkerLoad = 1001
+
+	started := make(chan struct{}, 1)
+	ok := ticker.Worker(func() {
+		started <- struct{}{}
+	})
+	if ok {
+		t.Fatal("Worker returned true on a closed ticker")
+	}
+
+	select {
+	case <-started:
+		t.Fatal("worker function started on a closed ticker")
+	default:
+	}
+}
+
 func TestWorkerUnlimited(t *testing.T) {
 	var wg sync.WaitGroup
 	var maxrate int32

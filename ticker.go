@@ -83,18 +83,18 @@ func (ticker *Ticker) Worker(f func()) (ok bool) {
 	if ok = ticker.Load() < ticker.WorkerLoad || ticker.Wait(); ok {
 		var sleepTime time.Duration
 		for ok {
-			workers := atomic.LoadInt32(&ticker.workers)
-			maxWorkers := ticker.maxWorkers()
-			if workers < maxWorkers {
-				if atomic.CompareAndSwapInt32(&ticker.workers, workers, workers+1) {
-					go func() {
-						defer atomic.AddInt32(&ticker.workers, -1)
-						f()
-					}()
-					break
-				}
-			} else {
-				if ok = !ticker.IsClosed(); ok {
+			if ok = !ticker.IsClosed(); ok {
+				workers := atomic.LoadInt32(&ticker.workers)
+				maxWorkers := ticker.maxWorkers()
+				if workers < maxWorkers {
+					if atomic.CompareAndSwapInt32(&ticker.workers, workers, workers+1) {
+						go func() {
+							defer atomic.AddInt32(&ticker.workers, -1)
+							f()
+						}()
+						break
+					}
+				} else {
 					if sleepTime < time.Millisecond*100 {
 						sleepTime += time.Second / SleepGranularity
 					}
