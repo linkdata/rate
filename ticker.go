@@ -63,9 +63,10 @@ func (ticker *Ticker) Drain() (drained int64) {
 }
 
 func (ticker *Ticker) maxWorkers() (n int32) {
+	workerMax := max(1, ticker.WorkerMax)
 	n = ticker.MaxRate() * ticker.WorkerRatio
-	if n < 1 || n > ticker.WorkerMax {
-		n = ticker.WorkerMax
+	if n < 1 || n > workerMax {
+		n = workerMax
 	}
 	return
 }
@@ -177,10 +178,7 @@ func LoadForRate(rate int32, maxrate *int32) (load int32) {
 				r64 += (mr64 / 1000) - 1
 			}
 			load64 := (r64 * 1000) / mr64
-			load = int32(load64)
-			if load > 1000 {
-				load = 1000
-			}
+			load = max(0, min(1000, int32(load64)))
 		}
 	}
 	return

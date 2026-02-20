@@ -366,6 +366,14 @@ func TestTicker_LoadForRateLargeValues(t *testing.T) {
 	}
 }
 
+func TestTicker_LoadForRateNegativeRateClamped(t *testing.T) {
+	maxrate := int32(100)
+	load := rate.LoadForRate(-1, &maxrate)
+	if load != 0 {
+		t.Fatalf("load is %d, wanted 0", load)
+	}
+}
+
 func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 	maxrate := int32(1)
 	ticker := rate.NewTicker(nil, &maxrate)
@@ -419,6 +427,43 @@ func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 		}
 	case <-time.After(variance * 4):
 		t.Fatal("second Worker call did not complete in time")
+	}
+}
+
+func TestWorkerTreatsNonPositiveWorkerMaxAsOne(t *testing.T) {
+	maxrate := int32(1000)
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	ticker.WorkerRatio = 1
+	ticker.WorkerLoad = 1000
+
+	tests := []int32{0, -1}
+	for _, workerMax := range tests {
+		ticker.WorkerMax = workerMax
+
+		started := make(chan struct{})
+		done := make(chan bool, 1)
+		go func() {
+			done <- ticker.Worker(func() {
+				close(started)
+			})
+		}()
+
+		select {
+		case ok := <-done:
+			if !ok {
+				t.Fatalf("Worker returned false for WorkerMax=%d", workerMax)
+			}
+		case <-time.After(variance * 4):
+			t.Fatalf("Worker blocked for WorkerMax=%d", workerMax)
+		}
+
+		select {
+		case <-started:
+		case <-time.After(variance * 4):
+			t.Fatalf("worker function did not start for WorkerMax=%d", workerMax)
+		}
 	}
 }
 
