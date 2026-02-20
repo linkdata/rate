@@ -176,7 +176,7 @@ func LoadForRate(rate int32, maxrate *int32) (load int32) {
 			r64 := int64(rate)
 			mr64 := int64(mr)
 			load64 := (r64*1000 + mr64 - 1) / mr64
-			load = max(0, min(1000, int32(load64)))
+			load = max(0, min(1000, int32(load64))) // #nosec G115
 		}
 	}
 	return
