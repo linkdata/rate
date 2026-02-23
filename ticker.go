@@ -1,6 +1,7 @@
 package rate
 
 import (
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -20,6 +21,7 @@ type Ticker struct {
 	closeCh       chan struct{}   // channel signalling Close() is called
 	counter       int64           // counter
 	padding       int32           // padding added by Wait
+	waiting       int32           // (atomic) Wait calls in progress on this ticker or descendants
 	rate          int32           // current rate
 	load          int32           // current load in permille
 }
@@ -41,6 +43,9 @@ func (ticker *Ticker) Close() {
 	}
 	ticker.mu.Unlock()
 	drained := ticker.Drain()
+	for atomic.LoadInt32(&ticker.waiting) != 0 {
+		runtime.Gosched()
+	}
 	ticker.mu.Lock()
 	ticker.counter -= drained
 	ticker.counter -= int64(ticker.padding)
@@ -107,17 +112,25 @@ func (ticker *Ticker) Worker(f func()) (ok bool) {
 	return
 }
 
+func (ticker *Ticker) chainUp(fn func(*Ticker)) {
+	for ticker != nil {
+		fn(ticker)
+		ticker = ticker.parent
+	}
+}
+
 // Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
 //
 // Returns true if we waited successfully, or false if the Ticker is closed.
 func (ticker *Ticker) Wait() (ok bool) {
+	ticker.chainUp(func(t *Ticker) { atomic.AddInt32(&t.waiting, 1) })
+	defer ticker.chainUp(func(t *Ticker) { atomic.AddInt32(&t.waiting, -1) })
 	if _, ok = <-ticker.tickCh; ok {
-		for ticker != nil {
-			ticker.mu.Lock()
-			ticker.padding++
-			ticker.mu.Unlock()
-			ticker = ticker.parent
-		}
+		ticker.chainUp(func(t *Ticker) {
+			t.mu.Lock()
+			t.padding++
+			t.mu.Unlock()
+		})
 	}
 	return
 }

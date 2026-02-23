@@ -70,6 +70,30 @@ func TestTickerClosingWithWaiters(t *testing.T) {
 	}
 }
 
+func TestTickerClosingWithWaitersKeepsCountAccurate(t *testing.T) {
+	maxrate := int32(1000000)
+
+	for i := 0; i < 200; i++ {
+		ticker := rate.NewTicker(nil, &maxrate)
+		var wg sync.WaitGroup
+		for j := 0; j < 8; j++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				ticker.Wait()
+			}()
+		}
+
+		time.Sleep(time.Microsecond)
+		ticker.Close()
+		wg.Wait()
+
+		if counter := ticker.Count(); counter != 0 {
+			t.Fatalf("iteration %d: counter is %d, wanted 0", i, counter)
+		}
+	}
+}
+
 func TestTickerClosingIsIdempotentAfterWait(t *testing.T) {
 	maxrate := int32(100000)
 	ticker := rate.NewTicker(nil, &maxrate)
