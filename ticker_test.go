@@ -351,6 +351,40 @@ func TestTickerRateDropsToZeroWhenIdle(t *testing.T) {
 	}
 }
 
+func TestTickerTimerIntervalSnapshotAtNewTicker(t *testing.T) {
+	rate.TickerTimerInterval = time.Millisecond * 20
+	defer func() {
+		rate.TickerTimerInterval = time.Second
+	}()
+
+	maxrate := int32(1000)
+	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
+
+	now := time.Now()
+	for time.Since(now) < rate.TickerTimerInterval*3 {
+		_, ok := <-ticker.C
+		if !ok {
+			t.Fatal("ticker channel closed early")
+		}
+	}
+
+	if highRate := ticker.Rate(); highRate < 200 {
+		t.Fatal("failed to observe non-idle rate", highRate)
+	}
+
+	// Changing the global interval after ticker startup should not affect this ticker.
+	rate.TickerTimerInterval = time.Second * 5
+
+	time.Sleep(time.Millisecond * 200)
+	if got := ticker.Rate(); got != 0 {
+		t.Fatalf("expected idle rate to reach zero with snapped interval, got %d", got)
+	}
+	if got := ticker.Load(); got != 0 {
+		t.Fatalf("expected idle load to reach zero with snapped interval, got %d", got)
+	}
+}
+
 func TestInitialLoad(t *testing.T) {
 	maxrate := int32(100000)
 	ticker := rate.NewTicker(nil, &maxrate)
@@ -434,12 +468,12 @@ func TestTicker_LoadForRateRoundsUp(t *testing.T) {
 		load    int32
 	}{
 		// Small maxrate: rounding correction was not applied
-		{"3,1", 3, 1, 334},     // ceil(1000/3) = 334, was 333
-		{"3,2", 3, 2, 667},     // ceil(2000/3) = 667, was 666
-		{"7,1", 7, 1, 143},     // ceil(1000/7) = 143, was 142
-		{"7,3", 7, 3, 429},     // ceil(3000/7) = 429, was 428
-		{"11,1", 11, 1, 91},    // ceil(1000/11) = 91, was 90
-		{"999,1", 999, 1, 2},   // ceil(1000/999) = 2, was 1
+		{"3,1", 3, 1, 334},         // ceil(1000/3) = 334, was 333
+		{"3,2", 3, 2, 667},         // ceil(2000/3) = 667, was 666
+		{"7,1", 7, 1, 143},         // ceil(1000/7) = 143, was 142
+		{"7,3", 7, 3, 429},         // ceil(3000/7) = 429, was 428
+		{"11,1", 11, 1, 91},        // ceil(1000/11) = 91, was 90
+		{"999,1", 999, 1, 2},       // ceil(1000/999) = 2, was 1
 		{"999,998", 999, 998, 999}, // ceil(998000/999) = 999, was 998
 
 		// Large maxrate: rounding correction was off by 1
