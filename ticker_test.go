@@ -2,6 +2,7 @@ package rate_test
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -304,7 +305,7 @@ func TestTickerRateTracksRateChanges(t *testing.T) {
 		t.Fatal("failed to observe high rate", highRate)
 	}
 
-	maxrate = 100
+	atomic.StoreInt32(&maxrate, 100)
 	now = time.Now()
 	for time.Since(now) < rate.TickerTimerInterval*6 {
 		_, ok := <-ticker.C
@@ -613,7 +614,7 @@ func TestWorkerUnlimited(t *testing.T) {
 	ticker := rate.NewTicker(nil, &maxrate)
 	defer ticker.Close()
 
-	maxrate = ticker.WorkerMax
+	atomic.StoreInt32(&maxrate, ticker.WorkerMax)
 
 	wg.Add(1)
 	ticker.WorkerRatio = 2 // overflows WorkerMax
