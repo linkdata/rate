@@ -188,6 +188,37 @@ func TestWait(t *testing.T) {
 	}
 }
 
+func TestSubTickerWaitAccounting(t *testing.T) {
+	var wantcounter int64
+
+	maxrate := int32(1000)
+	parent := rate.NewTicker(nil, &maxrate)
+	defer parent.Close()
+	ticker := rate.NewTicker(parent, nil)
+	defer ticker.Close()
+
+	if ok := ticker.Wait(); !ok {
+		t.Fatal("ticker closed early")
+	}
+
+	<-ticker.C
+	wantcounter++
+	<-ticker.C
+	wantcounter++
+
+	deadline := time.Now().Add(variance * 10)
+	for time.Now().Before(deadline) {
+		if ticker.Count() == wantcounter {
+			break
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	if counter := ticker.Count(); counter != wantcounter {
+		t.Error("counter is", counter, ", but expected", wantcounter)
+	}
+}
+
 func TestWaitTwice(t *testing.T) {
 	var wantcounter int64
 

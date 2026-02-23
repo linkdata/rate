@@ -111,12 +111,12 @@ func (ticker *Ticker) Worker(f func()) (ok bool) {
 // Returns true if we waited successfully, or false if the Ticker is closed.
 func (ticker *Ticker) Wait() (ok bool) {
 	if _, ok = <-ticker.tickCh; ok {
-		for ticker.parent != nil {
+		for ticker != nil {
+			ticker.mu.Lock()
+			ticker.padding++
+			ticker.mu.Unlock()
 			ticker = ticker.parent
 		}
-		ticker.mu.Lock()
-		ticker.padding++
-		ticker.mu.Unlock()
 	}
 	return
 }
