@@ -43,7 +43,7 @@ func ExampleTicker_Worker() {
 	taskCh := make(chan int)
 	go func() {
 		defer close(taskCh)
-		for i := 0; i < numTasks; i++ {
+		for i := range numTasks {
 			taskCh <- i
 		}
 	}()
@@ -60,7 +60,6 @@ func ExampleTicker_Worker() {
 	for task := range taskCh {
 		// make sure to not alias variables you use in the lambda
 		// in case you use Go versions prior to 1.22.
-		task := task
 
 		if !ticker.Worker(func() {
 			// let's keep track of the highest number of concurrent worker goroutines
@@ -83,7 +82,7 @@ func ExampleTicker_Worker() {
 
 	// calculate the expected result
 	var wantResult int64
-	for i := int64(0); i < numTasks; i++ {
+	for i := range int64(numTasks) {
 		for j := int64(0); j <= i; j++ {
 			wantResult += j
 		}
