@@ -2,6 +2,7 @@ package rate_test
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/linkdata/rate"
@@ -11,15 +12,18 @@ import (
 const variance = time.Millisecond * 10
 
 func TestLimiter_WaitNilSpins(t *testing.T) {
-	var rl rate.Limiter
+	synctest.Test(t, func(t *testing.T) {
+		var rl rate.Limiter
 
-	now := time.Now()
-	for i := 0; i < 10000; i++ {
-		rl.Wait(nil)
-	}
-	if d := time.Since(now); d > variance {
-		t.Errorf("%v > %v", d, variance)
-	}
+		now := time.Now()
+		for i := 0; i < 10000; i++ {
+			rl.Wait(nil)
+		}
+		if d := time.Since(now); d > variance {
+			t.Errorf("%v > %v", d, variance)
+		}
+
+	})
 }
 
 func TestLimiter_Wait(t *testing.T) {
@@ -46,78 +50,90 @@ func TestLimiter_Wait(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			var rl rate.Limiter
-			now := time.Now()
-			for i := 0; i < tt.count; i++ {
-				rl.Wait(&tt.rate)
-			}
-			d := time.Since(now)
-			var want time.Duration
-			if tt.rate > 0 {
-				want = time.Second / time.Duration(tt.rate) * time.Duration(tt.count)
-			}
-			if d < want {
-				t.Errorf("%v < %v", d, want)
-			}
-			if d > want+variance {
-				t.Errorf("%v > %v", d, want+variance)
-			}
+			synctest.Test(t, func(t *testing.T) {
+				var rl rate.Limiter
+				now := time.Now()
+				for i := 0; i < tt.count; i++ {
+					rl.Wait(&tt.rate)
+				}
+				d := time.Since(now)
+				var want time.Duration
+				if tt.rate > 0 {
+					want = time.Second / time.Duration(tt.rate) * time.Duration(tt.count)
+				}
+				if d < want {
+					t.Errorf("%v < %v", d, want)
+				}
+				if d > want+variance {
+					t.Errorf("%v > %v", d, want+variance)
+				}
+
+			})
 		})
 	}
 }
 
 func TestLimiter_WaitRateChanges(t *testing.T) {
-	var rl rate.Limiter
-	now := time.Now()
-	rte := int32(rate.SleepGranularity)
-	for i := 0; i < 30; i++ {
-		if i == 10 {
-			rte = 0
+	synctest.Test(t, func(t *testing.T) {
+		var rl rate.Limiter
+		now := time.Now()
+		rte := int32(rate.SleepGranularity)
+		for i := 0; i < 30; i++ {
+			if i == 10 {
+				rte = 0
+			}
+			if i == 20 {
+				rte = rate.SleepGranularity
+			}
+			rl.Wait(&rte)
 		}
-		if i == 20 {
-			rte = rate.SleepGranularity
+		d := time.Since(now)
+		want := (time.Second / rate.SleepGranularity) * 20
+		if d < want {
+			t.Errorf("%v < %v", d, want)
 		}
-		rl.Wait(&rte)
-	}
-	d := time.Since(now)
-	want := (time.Second / rate.SleepGranularity) * 20
-	if d < want {
-		t.Errorf("%v < %v", d, want)
-	}
-	if d > want+variance {
-		t.Errorf("%v > %v", d, want+variance)
-	}
+		if d > want+variance {
+			t.Errorf("%v > %v", d, want+variance)
+		}
+
+	})
 }
 
 func TestLimiter_WaitWithCloseChannelTimesOut(t *testing.T) {
-	maxrate := int32(10)
-	closeCh := make(chan struct{})
-	rl := rate.Limiter{CloseCh: closeCh}
+	synctest.Test(t, func(t *testing.T) {
+		maxrate := int32(10)
+		closeCh := make(chan struct{})
+		rl := rate.Limiter{CloseCh: closeCh}
 
-	now := time.Now()
-	rl.Wait(&maxrate)
-	d := time.Since(now)
+		now := time.Now()
+		rl.Wait(&maxrate)
+		d := time.Since(now)
 
-	if d < time.Millisecond*80 {
-		t.Fatalf("%v < %v", d, time.Millisecond*80)
-	}
+		if d < time.Millisecond*80 {
+			t.Fatalf("%v < %v", d, time.Millisecond*80)
+		}
+
+	})
 }
 
 func TestLimiter_WaitWithCloseChannelCanInterrupt(t *testing.T) {
-	maxrate := int32(10)
-	closeCh := make(chan struct{})
-	rl := rate.Limiter{CloseCh: closeCh}
+	synctest.Test(t, func(t *testing.T) {
+		maxrate := int32(10)
+		closeCh := make(chan struct{})
+		rl := rate.Limiter{CloseCh: closeCh}
 
-	go func() {
-		time.Sleep(time.Millisecond * 5)
-		close(closeCh)
-	}()
+		go func() {
+			time.Sleep(time.Millisecond * 5)
+			close(closeCh)
+		}()
 
-	now := time.Now()
-	rl.Wait(&maxrate)
-	d := time.Since(now)
+		now := time.Now()
+		rl.Wait(&maxrate)
+		d := time.Since(now)
 
-	if d > time.Millisecond*50 {
-		t.Fatalf("%v > %v", d, time.Millisecond*50)
-	}
+		if d > time.Millisecond*50 {
+			t.Fatalf("%v > %v", d, time.Millisecond*50)
+		}
+
+	})
 }
