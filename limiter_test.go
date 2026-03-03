@@ -16,7 +16,7 @@ func TestLimiter_WaitNilSpins(t *testing.T) {
 		var rl rate.Limiter
 
 		now := time.Now()
-		for i := 0; i < 10000; i++ {
+		for range 10000 {
 			rl.Wait(nil)
 		}
 		if d := time.Since(now); d > variance {
@@ -78,7 +78,7 @@ func TestLimiter_WaitRateChanges(t *testing.T) {
 		var rl rate.Limiter
 		now := time.Now()
 		rte := int32(rate.SleepGranularity)
-		for i := 0; i < 30; i++ {
+		for i := range 30 {
 			if i == 10 {
 				rte = 0
 			}
@@ -133,6 +133,35 @@ func TestLimiter_WaitWithCloseChannelCanInterrupt(t *testing.T) {
 
 		if d > time.Millisecond*50 {
 			t.Fatalf("%v > %v", d, time.Millisecond*50)
+		}
+
+	})
+}
+
+func TestLimiter_WaitAfterInterruptionDoesNotOversleep(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		maxrate := int32(10)
+		closeCh := make(chan struct{})
+		rl := rate.Limiter{CloseCh: closeCh}
+
+		go func() {
+			time.Sleep(time.Millisecond * 5)
+			close(closeCh)
+		}()
+
+		now := time.Now()
+		rl.Wait(&maxrate)
+		d := time.Since(now)
+		if d > time.Millisecond*50 {
+			t.Fatalf("%v > %v", d, time.Millisecond*50)
+		}
+
+		rl.CloseCh = nil
+		now = time.Now()
+		rl.Wait(&maxrate)
+		d = time.Since(now)
+		if d > time.Millisecond*120 {
+			t.Fatalf("%v > %v", d, time.Millisecond*120)
 		}
 
 	})

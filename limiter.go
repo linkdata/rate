@@ -45,14 +45,16 @@ func (rl *Limiter) Wait(maxrate *int32) {
 				elapsed := time.Since(rl.lastEnded)
 				rl.lastEnded = rl.lastEnded.Add(elapsed)
 				if toSleep := rl.sleepDur - elapsed; toSleep > 0 {
-					rl.lastEnded = rl.lastEnded.Add(toSleep)
 					if toSleep > (time.Second/SleepGranularity)*10 && rl.CloseCh != nil {
 						select {
-						case <-time.After(toSleep):
+						case t := <-time.After(toSleep):
+							rl.lastEnded = t
 						case <-rl.CloseCh:
+							rl.lastEnded = time.Now()
 						}
 					} else {
 						time.Sleep(toSleep)
+						rl.lastEnded = rl.lastEnded.Add(toSleep)
 					}
 				}
 			}
