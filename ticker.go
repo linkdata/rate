@@ -155,7 +155,10 @@ func (ticker *Ticker) WorkerCount() int32 {
 	return atomic.LoadInt32(&ticker.workers)
 }
 
-// Rate returns the current rate of ticks per second.
+// Rate returns an advisory estimate of the current rate of ticks per second.
+//
+// The value is sampled periodically, so it may lag behind sudden rate changes
+// and can momentarily exceed MaxRate().
 func (ticker *Ticker) Rate() (n int32) {
 	ticker.mu.Lock()
 	n = ticker.rate

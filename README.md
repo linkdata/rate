@@ -12,6 +12,7 @@ Because too much of the CPU consumed was `golang.org/x/time/rate.Limiter.Wait()`
 This package uses ticks-per-second rather than `time.Duration`, and is suitable for high-tickrate applications.
 It allows you to change the rate by simply atomically changing an `int32`. It has no practical limitation on the upper rate.
 If you need a slower rate than once per second, you're better off using `time.Ticker`.
+`Ticker.Rate()` is advisory telemetry sampled over time, so it can temporarily lag and briefly exceed `MaxRate()`.
 
 ### Sample usage
 
