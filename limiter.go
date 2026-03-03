@@ -30,10 +30,7 @@ func (rl *Limiter) Wait(maxrate *int32) {
 			rl.lastEnded = time.Now()
 			rl.count = 0
 			if newRate > 0 {
-				countMax := newRate / SleepGranularity
-				if countMax < 1 {
-					countMax = 1
-				}
+				countMax := max(newRate/SleepGranularity, 1)
 				rl.countMax = countMax
 				rl.sleepDur = time.Second * time.Duration(rl.countMax) / time.Duration(newRate)
 			} else {
