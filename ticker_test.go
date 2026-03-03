@@ -197,6 +197,73 @@ func TestNewSubTicker(t *testing.T) {
 	})
 }
 
+func TestChildTickerReportsClosedAfterParentClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		maxrate := int32(1000)
+		parent := rate.NewTicker(nil, &maxrate)
+		defer parent.Close()
+
+		child := rate.NewTicker(parent, nil)
+		defer child.Close()
+
+		if _, ok := <-child.C; !ok {
+			t.Fatal("child ticker closed early")
+		}
+
+		parent.Close()
+
+		// There can be at most one extra tick to read after parent.Close.
+		if _, ok := <-child.C; ok {
+			if _, ok := <-child.C; ok {
+				t.Fatal("child ticker channel remained open after parent close")
+			}
+		}
+
+		if !child.IsClosed() {
+			t.Fatal("IsClosed returned false after child ticker channel closed")
+		}
+	})
+}
+
+func TestWorkerDoesNotStartAfterParentClose(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		maxrate := int32(1000)
+		parent := rate.NewTicker(nil, &maxrate)
+		defer parent.Close()
+
+		child := rate.NewTicker(parent, nil)
+		defer child.Close()
+
+		if _, ok := <-child.C; !ok {
+			t.Fatal("child ticker closed early")
+		}
+
+		parent.Close()
+
+		if _, ok := <-child.C; ok {
+			if _, ok := <-child.C; ok {
+				t.Fatal("child ticker channel remained open after parent close")
+			}
+		}
+
+		child.WorkerLoad = 1001
+
+		started := make(chan struct{}, 1)
+		ok := child.Worker(func() {
+			started <- struct{}{}
+		})
+		if ok {
+			t.Fatal("Worker returned true on a child ticker closed by parent close")
+		}
+
+		select {
+		case <-started:
+			t.Fatal("worker started on a child ticker closed by parent close")
+		case <-time.After(variance):
+		}
+	})
+}
+
 func TestWait(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var wantcounter int64

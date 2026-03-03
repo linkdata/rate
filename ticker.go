@@ -212,6 +212,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 		close(ticker.tickCh)
 		timer.Stop()
 		ticker.mu.Lock()
+		ticker.closeCh = nil
 		ticker.load = 1000
 		ticker.rate = 0
 		ticker.mu.Unlock()
