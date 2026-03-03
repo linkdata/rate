@@ -17,6 +17,7 @@ type Limiter struct {
 	maxRate   int32
 	count     int32
 	countMax  int32
+	CloseCh   <-chan struct{} // may be nil, if set can break Wait() before waiting is complete
 }
 
 // Wait sleeps at least long enough to ensure that Wait cannot be
@@ -45,7 +46,14 @@ func (rl *Limiter) Wait(maxrate *int32) {
 				rl.lastEnded = rl.lastEnded.Add(elapsed)
 				if toSleep := rl.sleepDur - elapsed; toSleep > 0 {
 					rl.lastEnded = rl.lastEnded.Add(toSleep)
-					time.Sleep(toSleep)
+					if toSleep > (time.Second/SleepGranularity)*10 && rl.CloseCh != nil {
+						select {
+						case <-time.After(toSleep):
+						case <-rl.CloseCh:
+						}
+					} else {
+						time.Sleep(toSleep)
+					}
 				}
 			}
 		}

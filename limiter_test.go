@@ -89,3 +89,35 @@ func TestLimiter_WaitRateChanges(t *testing.T) {
 	}
 }
 
+func TestLimiter_WaitWithCloseChannelTimesOut(t *testing.T) {
+	maxrate := int32(10)
+	closeCh := make(chan struct{})
+	rl := rate.Limiter{CloseCh: closeCh}
+
+	now := time.Now()
+	rl.Wait(&maxrate)
+	d := time.Since(now)
+
+	if d < time.Millisecond*80 {
+		t.Fatalf("%v < %v", d, time.Millisecond*80)
+	}
+}
+
+func TestLimiter_WaitWithCloseChannelCanInterrupt(t *testing.T) {
+	maxrate := int32(10)
+	closeCh := make(chan struct{})
+	rl := rate.Limiter{CloseCh: closeCh}
+
+	go func() {
+		time.Sleep(time.Millisecond * 5)
+		close(closeCh)
+	}()
+
+	now := time.Now()
+	rl.Wait(&maxrate)
+	d := time.Since(now)
+
+	if d > time.Millisecond*50 {
+		t.Fatalf("%v > %v", d, time.Millisecond*50)
+	}
+}

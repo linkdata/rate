@@ -18,18 +18,18 @@ type Ticker struct {
 	// WorkerRatio is the ratio of max workers to max rate, default 1.
 	// Do not change WorkerRatio while Worker() may run; synchronize externally if you must update it at runtime.
 	WorkerRatio   int32
-	timerInterval time.Duration   // Snapshot of TickerTimerInterval taken at NewTicker
-	tickCh        chan struct{}   // source for C, closed by runner
-	parent        *Ticker         // parent Ticker, or nil
-	maxrate       *int32          // (atomic) maxrate pointer, or nil
-	workers       int32           // (atomic) number of workers started by Worker()
-	mu            sync.Mutex      // protects following
-	closeCh       chan struct{}   // channel signalling Close() is called
-	counter       int64           // counter
-	padding       int32           // padding added by Wait
-	waiting       int32           // (atomic) Wait calls in progress on this ticker or descendants
-	rate          int32           // current rate
-	load          int32           // current load in permille
+	timerInterval time.Duration // Snapshot of TickerTimerInterval taken at NewTicker
+	tickCh        chan struct{} // source for C, closed by runner
+	parent        *Ticker       // parent Ticker, or nil
+	maxrate       *int32        // (atomic) maxrate pointer, or nil
+	workers       int32         // (atomic) number of workers started by Worker()
+	mu            sync.Mutex    // protects following
+	closeCh       chan struct{} // channel signalling Close() is called
+	counter       int64         // counter
+	padding       int32         // padding added by Wait
+	waiting       int32         // (atomic) Wait calls in progress on this ticker or descendants
+	rate          int32         // current rate
+	load          int32         // current load in permille
 }
 
 // TickerTimerInterval is how often new Tickers update rate and load metrics.
@@ -218,6 +218,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 	var tickCh chan struct{}
 	var parentCh <-chan struct{}
 
+	rl.CloseCh = closeCh
 	rateWhen := time.Now()
 	rateCount := ticker.counter
 	needElapsed := (ticker.timerInterval * 10) / 11
