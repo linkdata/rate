@@ -77,12 +77,12 @@ func (ticker *Ticker) Drain() (drained int64) {
 }
 
 func (ticker *Ticker) maxWorkers() (n int32) {
-	workerMax := max(1, ticker.WorkerMax)
-	n = ticker.MaxRate() * ticker.WorkerRatio
-	if n < 1 || n > workerMax {
-		n = workerMax
+	workerMax := int64(max(1, ticker.WorkerMax))
+	n64 := int64(ticker.MaxRate()) * int64(ticker.WorkerRatio)
+	if n64 < 1 {
+		n64 = workerMax
 	}
-	return
+	return int32(min(max(n64, 1), workerMax)) // #nosec G115
 }
 
 // Worker starts f when the current load allows.

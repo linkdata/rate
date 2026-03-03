@@ -57,12 +57,10 @@ func TestTickerClosingWithWaiters(t *testing.T) {
 		maxrate := int32(time.Second / variance * 2)
 		ticker := rate.NewTicker(nil, &maxrate)
 		var wg sync.WaitGroup
-		for i := 0; i < 10; i++ {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+		for range 10 {
+			wg.Go(func() {
 				ticker.Wait()
-			}()
+			})
 		}
 		ticker.Wait()
 		ticker.Close()
@@ -82,15 +80,13 @@ func TestTickerClosingWithWaitersKeepsCountAccurate(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		maxrate := int32(1000000)
 
-		for i := 0; i < 200; i++ {
+		for i := range 200 {
 			ticker := rate.NewTicker(nil, &maxrate)
 			var wg sync.WaitGroup
-			for j := 0; j < 8; j++ {
-				wg.Add(1)
-				go func() {
-					defer wg.Done()
+			for range 8 {
+				wg.Go(func() {
 					ticker.Wait()
-				}()
+				})
 			}
 
 			time.Sleep(time.Microsecond)
@@ -133,13 +129,13 @@ func TestNewTicker(t *testing.T) {
 		now := time.Now()
 		ticker := rate.NewTicker(nil, nil)
 		defer ticker.Close()
-		for i := 0; i < n; i++ {
+		for range n {
 			_, ok := <-ticker.C
 			if !ok {
 				t.Error("ticker channel closed early")
 			}
 		}
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if ticker.Count() == n {
 				break
 			}
@@ -164,7 +160,7 @@ func TestNewSubTicker(t *testing.T) {
 		defer t1.Close()
 		t2 := rate.NewTicker(t1, nil)
 		defer t2.Close()
-		for i := 0; i < n; i++ {
+		for range n {
 			_, ok := <-t2.C
 			if !ok {
 				t.Error("ticker channel closed early")
@@ -173,7 +169,7 @@ func TestNewSubTicker(t *testing.T) {
 		if d := time.Since(now); d > variance {
 			t.Errorf("%v > %v", d, variance)
 		}
-		for i := 0; i < 10; i++ {
+		for range 10 {
 			if t2.Count() == n {
 				break
 			}
@@ -347,12 +343,10 @@ func TestWaitTwice(t *testing.T) {
 		defer ticker.Close()
 
 		var wg sync.WaitGroup
-		wg.Add(1)
 
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			ticker.Wait()
-		}()
+		})
 		ticker.Wait()
 
 		wg.Wait()
@@ -534,14 +528,14 @@ func TestInitialLoad(t *testing.T) {
 		if load := ticker.Load(); load != 0 {
 			t.Error("load out of spec", load)
 		}
-		for i := 0; i < 1100; i++ {
+		for range 1100 {
 			_, ok := <-ticker.C
 			if !ok {
 				t.Fatal("ticker channel closed early")
 			}
 		}
 
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			if load := ticker.Load(); load < 10 || load > 1000 {
 				t.Error("load out of spec", load, ticker.Count(), ticker.Rate())
 			}
