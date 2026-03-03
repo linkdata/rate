@@ -8,10 +8,16 @@ import (
 )
 
 type Ticker struct {
-	C             <-chan struct{} // Sends a struct{}{} at most maxrate times per second
-	WorkerMax     int32           // Maximum number of workers that may be started with Worker(), default 10000
-	WorkerLoad    int32           // Load at which we stop starting new workers, default 1000
-	WorkerRatio   int32           // Ratio of max workers to max rate, default 1
+	C <-chan struct{} // Sends a struct{}{} at most maxrate times per second
+	// WorkerMax is the maximum number of workers that may be started with Worker(), default 10000.
+	// Do not change WorkerMax while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerMax int32
+	// WorkerLoad is the load at which we stop starting new workers, default 1000.
+	// Do not change WorkerLoad while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerLoad int32
+	// WorkerRatio is the ratio of max workers to max rate, default 1.
+	// Do not change WorkerRatio while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerRatio   int32
 	timerInterval time.Duration   // Snapshot of TickerTimerInterval taken at NewTicker
 	tickCh        chan struct{}   // source for C, closed by runner
 	parent        *Ticker         // parent Ticker, or nil
@@ -28,6 +34,7 @@ type Ticker struct {
 
 // TickerTimerInterval is how often new Tickers update rate and load metrics.
 // The value is snapped by NewTicker(); changing it only affects future Tickers.
+// Do not change TickerTimerInterval while NewTicker() may run; set it before starting tickers.
 var TickerTimerInterval = time.Second
 
 // Close stops the Ticker and frees resources.
