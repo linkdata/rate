@@ -8,26 +8,33 @@ import (
 )
 
 type Ticker struct {
-	C             <-chan struct{} // Sends a struct{}{} at most maxrate times per second
-	WorkerMax     int32           // Maximum number of workers that may be started with Worker(), default 10000
-	WorkerLoad    int32           // Load at which we stop starting new workers, default 1000
-	WorkerRatio   int32           // Ratio of max workers to max rate, default 1
-	timerInterval time.Duration   // Snapshot of TickerTimerInterval taken at NewTicker
-	tickCh        chan struct{}   // source for C, closed by runner
-	parent        *Ticker         // parent Ticker, or nil
-	maxrate       *int32          // (atomic) maxrate pointer, or nil
-	workers       int32           // (atomic) number of workers started by Worker()
-	mu            sync.Mutex      // protects following
-	closeCh       chan struct{}   // channel signalling Close() is called
-	counter       int64           // counter
-	padding       int32           // padding added by Wait
-	waiting       int32           // (atomic) Wait calls in progress on this ticker or descendants
-	rate          int32           // current rate
-	load          int32           // current load in permille
+	C <-chan struct{} // Sends a struct{}{} at most maxrate times per second
+	// WorkerMax is the maximum number of workers that may be started with Worker(), default 10000.
+	// Do not change WorkerMax while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerMax int32
+	// WorkerLoad is the load at which we stop starting new workers, default 1000.
+	// Do not change WorkerLoad while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerLoad int32
+	// WorkerRatio is the ratio of max workers to max rate, default 1.
+	// Do not change WorkerRatio while Worker() may run; synchronize externally if you must update it at runtime.
+	WorkerRatio   int32
+	timerInterval time.Duration // Snapshot of TickerTimerInterval taken at NewTicker
+	tickCh        chan struct{} // source for C, closed by runner
+	parent        *Ticker       // parent Ticker, or nil
+	maxrate       *int32        // (atomic) maxrate pointer, or nil
+	workers       int32         // (atomic) number of workers started by Worker()
+	mu            sync.Mutex    // protects following
+	closeCh       chan struct{} // channel signalling Close() is called
+	counter       int64         // counter
+	padding       int32         // padding added by Wait
+	waiting       int32         // (atomic) Wait calls in progress on this ticker or descendants
+	rate          int32         // current rate
+	load          int32         // current load in permille
 }
 
 // TickerTimerInterval is how often new Tickers update rate and load metrics.
 // The value is snapped by NewTicker(); changing it only affects future Tickers.
+// Do not change TickerTimerInterval while NewTicker() may run; set it before starting tickers.
 var TickerTimerInterval = time.Second
 
 // Close stops the Ticker and frees resources.
@@ -70,12 +77,12 @@ func (ticker *Ticker) Drain() (drained int64) {
 }
 
 func (ticker *Ticker) maxWorkers() (n int32) {
-	workerMax := max(1, ticker.WorkerMax)
-	n = ticker.MaxRate() * ticker.WorkerRatio
-	if n < 1 || n > workerMax {
-		n = workerMax
+	workerMax := int64(max(1, ticker.WorkerMax))
+	n64 := int64(ticker.MaxRate()) * int64(ticker.WorkerRatio)
+	if n64 < 1 {
+		n64 = workerMax
 	}
-	return
+	return int32(min(max(n64, 1), workerMax)) // #nosec G115
 }
 
 // Worker starts f when the current load allows.
@@ -148,7 +155,10 @@ func (ticker *Ticker) WorkerCount() int32 {
 	return atomic.LoadInt32(&ticker.workers)
 }
 
-// Rate returns the current rate of ticks per second.
+// Rate returns an advisory estimate of the current rate of ticks per second.
+//
+// The value is sampled periodically, so it may lag behind sudden rate changes
+// and can momentarily exceed MaxRate().
 func (ticker *Ticker) Rate() (n int32) {
 	ticker.mu.Lock()
 	n = ticker.rate
@@ -202,6 +212,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 		close(ticker.tickCh)
 		timer.Stop()
 		ticker.mu.Lock()
+		ticker.closeCh = nil
 		ticker.load = 1000
 		ticker.rate = 0
 		ticker.mu.Unlock()
@@ -211,6 +222,7 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 	var tickCh chan struct{}
 	var parentCh <-chan struct{}
 
+	rl.CloseCh = closeCh
 	rateWhen := time.Now()
 	rateCount := ticker.counter
 	needElapsed := (ticker.timerInterval * 10) / 11
