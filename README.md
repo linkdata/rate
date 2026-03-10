@@ -18,6 +18,7 @@ If you need a slower rate than once per second, you're better off using `time.Ti
 
 One of the more common non-trivial usages of rate limiting is restricting some underlying operation(s)
 being utilized by more complex worker goroutines. This package supports those with `Ticker.Worker()`.
+`Ticker.Worker()` gates worker creation; the worker itself should later consume ticker capacity.
 
 Assume we have a channel `taskCh` where we read tasks to process, and then
 want spawn worker goroutines that handle them. We want to spawn enough of them
@@ -25,9 +26,6 @@ to stay as close to the max rate as possible without starting *too* many of them
 
 ```go
 for task := range taskCh {
-  // make sure to not alias variables you use in the lambda
-  // in case you use Go versions prior to 1.22.
-  task := task
   if !ticker.Worker(func() { workerFn(ticker, task) }) {
     // if ticker.Worker() fails to start the worker, it means the Ticker is closed.
     break

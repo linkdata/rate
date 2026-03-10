@@ -92,6 +92,9 @@ func (ticker *Ticker) maxWorkers() (n int32) {
 // It limits the number of goroutines started this way to MaxRate() * WorkerRatio,
 // with a hard cap of WorkerMax. If MaxRate() * WorkerRatio is less than one,
 // WorkerMax is used.
+//
+// Worker does not itself consume a tick. It is intended for worker functions
+// that later consume ticker capacity, for example by reading from C.
 func (ticker *Ticker) Worker(f func()) (ok bool) {
 	if ok = ticker.Load() < ticker.WorkerLoad || ticker.Wait(); ok {
 		var sleepTime time.Duration

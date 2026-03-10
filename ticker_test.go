@@ -641,12 +641,12 @@ func TestTicker_LoadForRateRoundsUp(t *testing.T) {
 
 func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		maxrate := int32(1)
+		maxrate := int32(1000000)
 		ticker := rate.NewTicker(nil, &maxrate)
 		defer ticker.Close()
 
 		ticker.WorkerRatio = 1
-		ticker.WorkerMax = 10
+		ticker.WorkerMax = 1
 		ticker.WorkerLoad = 1000
 
 		firstStarted := make(chan struct{})
@@ -680,6 +680,9 @@ func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 		default:
 		}
 
+		if count := ticker.Count(); count != 0 {
+			t.Fatalf("counter is %d, wanted 0 while workers have not consumed ticks", count)
+		}
 		if workers := ticker.WorkerCount(); workers != 1 {
 			t.Fatalf("worker count is %d, wanted 1", workers)
 		}
@@ -700,7 +703,7 @@ func TestWorkerHonorsMaximumConcurrentWorkers(t *testing.T) {
 
 func TestWorkerTreatsNonPositiveWorkerMaxAsOne(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		maxrate := int32(1000)
+		maxrate := int32(1000000)
 		ticker := rate.NewTicker(nil, &maxrate)
 		defer ticker.Close()
 
@@ -768,12 +771,10 @@ func TestWorkerReturnsFalseAfterClose(t *testing.T) {
 func TestWorkerUnlimited(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var wg sync.WaitGroup
-		var maxrate int32
+		maxrate := int32(1000000)
 
 		ticker := rate.NewTicker(nil, &maxrate)
 		defer ticker.Close()
-
-		atomic.StoreInt32(&maxrate, ticker.WorkerMax)
 
 		wg.Add(1)
 		ticker.WorkerRatio = 2 // overflows WorkerMax
@@ -837,5 +838,36 @@ func TestWorkerLimited(t *testing.T) {
 			t.Errorf("%v > %v", d, wantElapsed*2+variance)
 		}
 
+	})
+}
+
+func TestWorkerWithoutTickConsumersLeavesTelemetryIdle(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		rate.TickerTimerInterval = time.Millisecond * 20
+		defer func() {
+			rate.TickerTimerInterval = time.Second
+		}()
+
+		maxrate := int32(1000)
+		ticker := rate.NewTicker(nil, &maxrate)
+		defer ticker.Close()
+
+		for range 10 {
+			if ok := ticker.Worker(func() {}); !ok {
+				t.Fatal("Worker returned false")
+			}
+		}
+
+		time.Sleep(rate.TickerTimerInterval * 3)
+
+		if got := ticker.Count(); got != 0 {
+			t.Fatalf("count is %d, wanted 0", got)
+		}
+		if got := ticker.Rate(); got != 0 {
+			t.Fatalf("rate is %d, wanted 0", got)
+		}
+		if got := ticker.Load(); got != 0 {
+			t.Fatalf("load is %d, wanted 0", got)
+		}
 	})
 }

@@ -30,14 +30,13 @@ func ExampleLimiter_Wait() {
 }
 
 func ExampleTicker_Worker() {
-	const numTasks = 100
-	const wantRate = numTasks / 10
+	const numTasks = 20
+	const wantRate = numTasks * 10
 	var result int64
-	var workerCount int32
-	var highestWorkerCount int32
 
 	maxrate := int32(wantRate)
 	ticker := rate.NewTicker(nil, &maxrate)
+	defer ticker.Close()
 
 	// make a task channel and spawn a goroutine sending to it
 	taskCh := make(chan int)
@@ -50,6 +49,7 @@ func ExampleTicker_Worker() {
 
 	// define a worker function that just adds and sleeps for a bit
 	workerFn := func(i int) {
+		<-ticker.C
 		for j := 0; j <= i; j++ {
 			time.Sleep(time.Millisecond)
 			atomic.AddInt64(&result, int64(j))
@@ -58,15 +58,7 @@ func ExampleTicker_Worker() {
 
 	// process all the tasks
 	for task := range taskCh {
-		// make sure to not alias variables you use in the lambda
-		// in case you use Go versions prior to 1.22.
-
 		if !ticker.Worker(func() {
-			// let's keep track of the highest number of concurrent worker goroutines
-			defer atomic.AddInt32(&workerCount, -1)
-			if count := atomic.AddInt32(&workerCount, 1); count > atomic.LoadInt32(&highestWorkerCount) {
-				atomic.StoreInt32(&highestWorkerCount, count)
-			}
 			// call the worker.
 			workerFn(task)
 		}) {
@@ -88,7 +80,7 @@ func ExampleTicker_Worker() {
 		}
 	}
 
-	fmt.Println(result == wantResult, atomic.LoadInt32(&highestWorkerCount) < numTasks/2)
+	fmt.Println(result == wantResult, ticker.WorkerCount() == 0)
 	// Output:
 	// true true
 }
