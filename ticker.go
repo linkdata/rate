@@ -131,6 +131,9 @@ func (ticker *Ticker) chainUp(fn func(*Ticker)) {
 
 // Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
 //
+// Ticker.Wait() is not a paced consumer; for a paced single-goroutine loop,
+// read <-Ticker.C directly or use Limiter.Wait.
+//
 // Returns true if we waited successfully, or false if the Ticker is closed.
 func (ticker *Ticker) Wait() (ok bool) {
 	ticker.chainUp(func(t *Ticker) { atomic.AddInt32(&t.waiting, 1) })
