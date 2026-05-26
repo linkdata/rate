@@ -56,3 +56,49 @@ func TestMaxWorkersCapsOverflowedWorkerRatioProduct(t *testing.T) {
 
 	})
 }
+
+func TestRunReturnsWhenParentAlreadyClosed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent := NewTicker(nil, nil)
+		parent.Close()
+
+		ticker := NewTicker(parent, nil)
+		defer ticker.Close()
+
+		if _, ok := <-ticker.C; ok {
+			t.Fatal("ticker channel remained open for already closed parent")
+		}
+
+		if !ticker.IsClosed() {
+			t.Fatal("ticker did not report closed")
+		}
+	})
+}
+
+func TestRunReturnsWhenParentChannelClosesBeforeCloseSignal(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parentC := make(chan struct{})
+		close(parentC)
+
+		parent := &Ticker{
+			C:       parentC,
+			closeCh: make(chan struct{}),
+		}
+		ticker := &Ticker{
+			timerInterval: time.Second,
+			tickCh:        make(chan struct{}),
+			closeCh:       make(chan struct{}),
+		}
+		ticker.C = ticker.tickCh
+
+		ticker.run(ticker.closeCh, parent)
+
+		if _, ok := <-ticker.C; ok {
+			t.Fatal("ticker channel remained open after closed parent channel")
+		}
+
+		if !ticker.IsClosed() {
+			t.Fatal("ticker did not report closed")
+		}
+	})
+}

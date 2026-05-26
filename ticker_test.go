@@ -221,6 +221,46 @@ func TestChildTickerReportsClosedAfterParentClose(t *testing.T) {
 	})
 }
 
+func TestChildTickerClosesAfterParentCloseWithoutConsumer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		parent := rate.NewTicker(nil, nil)
+		child := rate.NewTicker(parent, nil)
+		defer child.Close()
+
+		for parent.Count() == 0 {
+			runtime.Gosched()
+		}
+
+		parent.Close()
+		time.Sleep(variance)
+
+		if !child.IsClosed() {
+			t.Fatal("child ticker remained open after parent close")
+		}
+	})
+}
+
+func TestDescendantTickerClosesAfterAncestorCloseWithoutConsumer(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ancestor := rate.NewTicker(nil, nil)
+		parent := rate.NewTicker(ancestor, nil)
+		defer parent.Close()
+		child := rate.NewTicker(parent, nil)
+		defer child.Close()
+
+		for parent.Count() == 0 {
+			runtime.Gosched()
+		}
+
+		ancestor.Close()
+		time.Sleep(variance)
+
+		if !child.IsClosed() {
+			t.Fatal("descendant ticker remained open after ancestor close")
+		}
+	})
+}
+
 func TestWorkerDoesNotStartAfterParentClose(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		maxrate := int32(1000)
@@ -589,6 +629,12 @@ func TestTicker_LoadForRateLargeValues(t *testing.T) {
 		load := rate.LoadForRate(maxrate/2, &maxrate)
 		if load != 500 {
 			t.Fatalf("load is %d, wanted 500", load)
+		}
+
+		maxrate = 1
+		load = rate.LoadForRate(1<<31-1, &maxrate)
+		if load != 1000 {
+			t.Fatalf("saturated load is %d, wanted 1000", load)
 		}
 
 	})

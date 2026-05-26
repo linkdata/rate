@@ -24,7 +24,7 @@ type Ticker struct {
 	maxrate       *int32        // (atomic) maxrate pointer, or nil
 	workers       int32         // (atomic) number of workers started by Worker()
 	mu            sync.Mutex    // protects following
-	closeCh       chan struct{} // channel signalling Close() is called
+	closeCh       chan struct{} // closed when Close() is called or the runner stops
 	counter       int64         // counter
 	padding       int32         // padding added by Wait
 	waiting       int32         // (atomic) Wait calls in progress on this ticker or descendants
@@ -206,7 +206,8 @@ func LoadForRate(rate int32, maxrate *int32) (load int32) {
 			r64 := int64(rate)
 			mr64 := int64(mr)
 			load64 := (r64*1000 + mr64 - 1) / mr64
-			load = max(0, min(1000, int32(load64))) // #nosec G115
+			load64 = max(0, min(1000, load64))
+			load = int32(load64) // #nosec G115
 		}
 	}
 	return
@@ -218,7 +219,10 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 		close(ticker.tickCh)
 		timer.Stop()
 		ticker.mu.Lock()
-		ticker.closeCh = nil
+		if ticker.closeCh != nil {
+			close(ticker.closeCh)
+			ticker.closeCh = nil
+		}
 		ticker.load = 1000
 		ticker.rate = 0
 		ticker.mu.Unlock()
@@ -227,12 +231,19 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 	var rl Limiter
 	var tickCh chan struct{}
 	var parentCh <-chan struct{}
+	var parentCloseCh <-chan struct{}
 
 	rl.CloseCh = closeCh
 	rateWhen := time.Now()
 	rateCount := ticker.counter
 	needElapsed := (ticker.timerInterval * 10) / 11
 	if parent != nil {
+		parent.mu.Lock()
+		parentCloseCh = parent.closeCh
+		parent.mu.Unlock()
+		if parentCloseCh == nil {
+			return
+		}
 		parentCh = parent.C
 	} else {
 		tickCh = ticker.tickCh
@@ -269,6 +280,8 @@ func (ticker *Ticker) run(closeCh <-chan struct{}, parent *Ticker) {
 			}
 			parentCh = nil
 			tickCh = ticker.tickCh
+		case <-parentCloseCh:
+			return
 		case <-timer.C:
 			// update current rate and load
 			ticker.mu.Lock()
