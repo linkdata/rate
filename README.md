@@ -1,6 +1,5 @@
 [![build](https://github.com/linkdata/rate/actions/workflows/go.yml/badge.svg)](https://github.com/linkdata/rate/actions/workflows/go.yml)
 [![coverage](https://github.com/linkdata/rate/blob/coverage/main/badge.svg)](https://html-preview.github.io/?url=https://github.com/linkdata/rate/blob/coverage/main/report.html)
-[![goreport](https://goreportcard.com/badge/github.com/linkdata/rate)](https://goreportcard.com/report/github.com/linkdata/rate)
 [![Docs](https://godoc.org/github.com/linkdata/rate?status.svg)](https://godoc.org/github.com/linkdata/rate)
 
 ## An efficient rate limiter for Go
