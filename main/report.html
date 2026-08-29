@@ -1,0 +1,512 @@
+
+<!DOCTYPE html>
+<html>
+	<head>
+		<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+		<title>rate: Go Coverage Report</title>
+		<style>
+			body {
+				background: black;
+				color: rgb(80, 80, 80);
+			}
+			body, pre, #legend span {
+				font-family: Menlo, monospace;
+				font-weight: bold;
+			}
+			#topbar {
+				background: black;
+				position: fixed;
+				top: 0; left: 0; right: 0;
+				height: 42px;
+				border-bottom: 1px solid rgb(80, 80, 80);
+			}
+			#content {
+				margin-top: 50px;
+			}
+			#nav, #legend {
+				float: left;
+				margin-left: 10px;
+			}
+			#legend {
+				margin-top: 12px;
+			}
+			#nav {
+				margin-top: 10px;
+			}
+			#legend span {
+				margin: 0 5px;
+			}
+			.cov0 { color: rgb(192, 0, 0) }
+.cov1 { color: rgb(128, 128, 128) }
+.cov2 { color: rgb(116, 140, 131) }
+.cov3 { color: rgb(104, 152, 134) }
+.cov4 { color: rgb(92, 164, 137) }
+.cov5 { color: rgb(80, 176, 140) }
+.cov6 { color: rgb(68, 188, 143) }
+.cov7 { color: rgb(56, 200, 146) }
+.cov8 { color: rgb(44, 212, 149) }
+.cov9 { color: rgb(32, 224, 152) }
+.cov10 { color: rgb(20, 236, 155) }
+
+		</style>
+	</head>
+	<body>
+		<div id="topbar">
+			<div id="nav">
+				<select id="files">
+				
+				<option value="file0">github.com/linkdata/rate/limiter.go (100.0%)</option>
+				
+				<option value="file1">github.com/linkdata/rate/ticker.go (100.0%)</option>
+				
+				</select>
+			</div>
+			<div id="legend">
+				<span>not tracked</span>
+			
+				<span class="cov0">not covered</span>
+				<span class="cov8">covered</span>
+			
+			</div>
+		</div>
+		<div id="content">
+		
+		<pre class="file" id="file0" style="display: none">package rate
+
+import (
+        "sync/atomic"
+        "time"
+)
+
+// SleepGranularity 500 implies that the time.Sleep() granularity is at least 2ms
+const SleepGranularity = 500
+
+// Limiter provides efficient rate limiting. The zero value is immediately usable.
+//
+// A Limiter is not safe to use from multiple goroutines simultaneously.
+type Limiter struct {
+        lastEnded time.Time
+        sleepDur  time.Duration
+        maxRate   int32
+        count     int32
+        countMax  int32
+        CloseCh   &lt;-chan struct{} // may be nil, if set can break Wait() before waiting is complete
+}
+
+// Wait sleeps at least long enough to ensure that Wait cannot be
+// called more than `*maxrate` times per second.
+//
+// A nil `maxrate` or a `*maxrate` of zero or less doesn't wait at all.
+func (rl *Limiter) Wait(maxrate *int32) {
+        <span class="cov8" title="1">if maxrate != nil </span>{
+                <span class="cov8" title="1">if newRate := atomic.LoadInt32(maxrate); newRate != rl.maxRate </span>{
+                        <span class="cov8" title="1">rl.maxRate = newRate
+                        rl.lastEnded = time.Now()
+                        rl.count = 0
+                        if newRate &gt; 0 </span>{
+                                <span class="cov8" title="1">countMax := max(newRate/SleepGranularity, 1)
+                                rl.countMax = countMax
+                                rl.sleepDur = time.Second * time.Duration(rl.countMax) / time.Duration(newRate)
+</span>                        } else {
+                                <span class="cov8" title="1">rl.countMax = 0
+                                rl.sleepDur = 0
+</span>                        }
+                }
+                <span class="cov8" title="1">if rl.countMax &gt; 0 </span>{
+                        <span class="cov8" title="1">if rl.count++; rl.count &gt;= rl.countMax </span>{
+                                <span class="cov8" title="1">rl.count = 0
+                                elapsed := time.Since(rl.lastEnded)
+                                rl.lastEnded = rl.lastEnded.Add(elapsed)
+                                if toSleep := rl.sleepDur - elapsed; toSleep &gt; 0 </span>{
+                                        <span class="cov8" title="1">if toSleep &gt; (time.Second/SleepGranularity)*10 &amp;&amp; rl.CloseCh != nil </span>{
+                                                <span class="cov8" title="1">select </span>{
+                                                case t := &lt;-time.After(toSleep):
+                                                        <span class="cov8" title="1">rl.lastEnded = t</span>
+                                                case &lt;-rl.CloseCh:
+                                                        <span class="cov8" title="1">rl.lastEnded = time.Now()</span>
+                                                }
+                                        } else {
+                                                <span class="cov8" title="1">time.Sleep(toSleep)
+                                                rl.lastEnded = rl.lastEnded.Add(toSleep)
+</span>                                        }
+                                }
+                        }
+                }
+        }
+}
+</pre>
+		
+		<pre class="file" id="file1" style="display: none">package rate
+
+import (
+        "runtime"
+        "sync"
+        "sync/atomic"
+        "time"
+)
+
+type Ticker struct {
+        C &lt;-chan struct{} // Sends a struct{}{} at most maxrate times per second
+        // WorkerMax is the maximum number of workers that may be started with Worker(), default 10000.
+        // Do not change WorkerMax while Worker() may run; synchronize externally if you must update it at runtime.
+        WorkerMax int32
+        // WorkerLoad is the load at which we stop starting new workers, default 1000.
+        // Do not change WorkerLoad while Worker() may run; synchronize externally if you must update it at runtime.
+        WorkerLoad int32
+        // WorkerRatio is the ratio of max workers to max rate, default 1.
+        // Do not change WorkerRatio while Worker() may run; synchronize externally if you must update it at runtime.
+        WorkerRatio   int32
+        timerInterval time.Duration // Snapshot of TickerTimerInterval taken at NewTicker
+        tickCh        chan struct{} // source for C, closed by runner
+        parent        *Ticker       // parent Ticker, or nil
+        maxrate       *int32        // (atomic) maxrate pointer, or nil
+        workers       int32         // (atomic) number of workers started by Worker()
+        mu            sync.Mutex    // protects following
+        closeCh       chan struct{} // closed when Close() is called or the runner stops
+        counter       int64         // counter
+        padding       int32         // padding added by Wait
+        waiting       int32         // (atomic) Wait calls in progress on this ticker or descendants
+        rate          int32         // current rate
+        load          int32         // current load in permille
+}
+
+// TickerTimerInterval is how often new Tickers update rate and load metrics.
+// The value is snapped by NewTicker(); changing it only affects future Tickers.
+// Do not change TickerTimerInterval while NewTicker() may run; set it before starting tickers.
+var TickerTimerInterval = time.Second
+
+// Close stops the Ticker and frees resources.
+//
+// It is safe to call multiple times or concurrently.
+// Once Close() returns, no more ticks will be delivered, and if you passed a
+// non-nil ticker counter to NewTicker(), it will be correct.
+func (ticker *Ticker) Close() {
+        <span class="cov8" title="1">ticker.mu.Lock()
+        if ticker.closeCh != nil </span>{
+                <span class="cov8" title="1">close(ticker.closeCh)
+                ticker.closeCh = nil
+</span>        }
+        <span class="cov8" title="1">ticker.mu.Unlock()
+        drained := ticker.Drain()
+        for atomic.LoadInt32(&amp;ticker.waiting) != 0 </span>{
+                <span class="cov8" title="1">runtime.Gosched()
+</span>        }
+        <span class="cov8" title="1">ticker.mu.Lock()
+        ticker.counter -= drained
+        ticker.counter -= int64(ticker.padding)
+        ticker.padding = 0
+        ticker.mu.Unlock()</span>
+}
+
+// IsClosed returns true if the Ticker is closed.
+func (ticker *Ticker) IsClosed() (yes bool) {
+        <span class="cov8" title="1">ticker.mu.Lock()
+        yes = ticker.closeCh == nil
+        ticker.mu.Unlock()
+        return
+</span>}
+
+// Drain consumes ticks from the Ticker until it is closed. Returns the number of ticks drained.
+func (ticker *Ticker) Drain() (drained int64) {
+        <span class="cov8" title="1">for range ticker.tickCh </span>{
+                <span class="cov8" title="1">drained++
+</span>        }
+        <span class="cov8" title="1">return</span>
+}
+
+func (ticker *Ticker) maxWorkers() (n int32) {
+        <span class="cov8" title="1">workerMax := int64(max(1, ticker.WorkerMax))
+        n64 := int64(ticker.MaxRate()) * int64(ticker.WorkerRatio)
+        if n64 &lt; 1 </span>{
+                <span class="cov8" title="1">n64 = workerMax
+</span>        }
+        <span class="cov8" title="1">return int32(min(max(n64, 1), workerMax))</span> // #nosec G115
+}
+
+// Worker starts f when the current load allows.
+// Returns true if the goroutine was started.
+// Returns false if the ticker is no longer running.
+//
+// It limits the number of goroutines started this way to MaxRate() * WorkerRatio,
+// with a hard cap of WorkerMax. If MaxRate() * WorkerRatio is less than one,
+// WorkerMax is used.
+//
+// Worker does not itself consume a tick. It is intended for worker functions
+// that later consume ticker capacity, for example by reading from C.
+func (ticker *Ticker) Worker(f func()) (ok bool) {
+        <span class="cov8" title="1">if ok = ticker.Load() &lt; ticker.WorkerLoad || ticker.Wait(); ok </span>{
+                <span class="cov8" title="1">var sleepTime time.Duration
+                for ok </span>{
+                        <span class="cov8" title="1">if ok = !ticker.IsClosed(); ok </span>{
+                                <span class="cov8" title="1">workers := atomic.LoadInt32(&amp;ticker.workers)
+                                maxWorkers := ticker.maxWorkers()
+                                if workers &lt; maxWorkers </span>{
+                                        <span class="cov8" title="1">if atomic.CompareAndSwapInt32(&amp;ticker.workers, workers, workers+1) </span>{
+                                                <span class="cov8" title="1">go func() </span>{
+                                                        <span class="cov8" title="1">defer atomic.AddInt32(&amp;ticker.workers, -1)
+                                                        f()
+</span>                                                }()
+                                                <span class="cov8" title="1">break</span>
+                                        }
+                                } else {
+                                        <span class="cov8" title="1">if sleepTime &lt; time.Millisecond*100 </span>{
+                                                <span class="cov8" title="1">sleepTime += time.Second / SleepGranularity
+</span>                                        }
+                                        <span class="cov8" title="1">time.Sleep(sleepTime)</span>
+                                }
+                        }
+                }
+        }
+        <span class="cov8" title="1">return</span>
+}
+
+func (ticker *Ticker) chainUp(fn func(*Ticker)) {
+        <span class="cov8" title="1">for ticker != nil </span>{
+                <span class="cov8" title="1">fn(ticker)
+                ticker = ticker.parent
+</span>        }
+}
+
+// Wait delays until the next tick is available, then adds a "free tick" back to the Ticker.
+//
+// Ticker.Wait() is not a paced consumer; for a paced single-goroutine loop,
+// read &lt;-Ticker.C directly or use Limiter.Wait.
+//
+// Returns true if we waited successfully, or false if the Ticker is closed.
+func (ticker *Ticker) Wait() (ok bool) {
+        <span class="cov8" title="1">ticker.chainUp(func(t *Ticker) </span>{ <span class="cov8" title="1">atomic.AddInt32(&amp;t.waiting, 1) }</span>)
+        <span class="cov8" title="1">defer ticker.chainUp(func(t *Ticker) </span>{ <span class="cov8" title="1">atomic.AddInt32(&amp;t.waiting, -1) }</span>)
+        <span class="cov8" title="1">if _, ok = &lt;-ticker.tickCh; ok </span>{
+                <span class="cov8" title="1">ticker.chainUp(func(t *Ticker) </span>{
+                        <span class="cov8" title="1">t.mu.Lock()
+                        t.padding++
+                        t.mu.Unlock()
+</span>                })
+        }
+        <span class="cov8" title="1">return</span>
+}
+
+// Count returns the number of ticks delivered so far.
+func (ticker *Ticker) Count() (n int64) {
+        <span class="cov8" title="1">ticker.mu.Lock()
+        n = ticker.counter
+        ticker.mu.Unlock()
+        return
+</span>}
+
+// WorkerCount returns the number of currently running workers.
+func (ticker *Ticker) WorkerCount() int32 {
+        <span class="cov8" title="1">return atomic.LoadInt32(&amp;ticker.workers)
+</span>}
+
+// Rate returns an advisory estimate of the current rate of ticks per second.
+//
+// The value is sampled periodically, so it may lag behind sudden rate changes
+// and can momentarily exceed MaxRate().
+func (ticker *Ticker) Rate() (n int32) {
+        <span class="cov8" title="1">ticker.mu.Lock()
+        n = ticker.rate
+        ticker.mu.Unlock()
+        return
+</span>}
+
+// MaxRate returns the current max rate of ticks per second.
+func (ticker *Ticker) MaxRate() (n int32) {
+        <span class="cov8" title="1">if ticker.maxrate != nil </span>{
+                <span class="cov8" title="1">n = atomic.LoadInt32(ticker.maxrate)
+</span>        }
+        <span class="cov8" title="1">return</span>
+}
+
+// Load returns the current load in permille.
+//
+// Load is rounded up, and is only zero if the rate is zero.
+// If the Ticker has parent Ticker(s), the highest load is returned.
+// Closed Tickers have a load of 1000.
+func (ticker *Ticker) Load() (load int32) {
+        <span class="cov8" title="1">for ticker != nil </span>{
+                <span class="cov8" title="1">ticker.mu.Lock()
+                if ticker.load &gt; load </span>{
+                        <span class="cov8" title="1">load = ticker.load
+</span>                }
+                <span class="cov8" title="1">ticker.mu.Unlock()
+                ticker = ticker.parent</span>
+        }
+        <span class="cov8" title="1">return</span>
+}
+
+// LoadForRate calculates the load given a rate and maxrate.
+func LoadForRate(rate int32, maxrate *int32) (load int32) {
+        <span class="cov8" title="1">if maxrate != nil </span>{
+                <span class="cov8" title="1">if mr := atomic.LoadInt32(maxrate); mr &gt; 0 </span>{
+                        // Use int64 arithmetic to avoid overflow at high rates.
+                        // Ceiling division: ceil(rate * 1000 / mr) = (rate * 1000 + mr - 1) / mr
+                        <span class="cov8" title="1">r64 := int64(rate)
+                        mr64 := int64(mr)
+                        load64 := (r64*1000 + mr64 - 1) / mr64
+                        load64 = max(0, min(1000, load64))
+                        load = int32(load64) // #nosec G115
+</span>                }
+        }
+        <span class="cov8" title="1">return</span>
+}
+
+func (ticker *Ticker) run(closeCh &lt;-chan struct{}, parent *Ticker) {
+        <span class="cov8" title="1">timer := time.NewTimer(ticker.timerInterval)
+        defer func() </span>{
+                <span class="cov8" title="1">close(ticker.tickCh)
+                timer.Stop()
+                ticker.mu.Lock()
+                if ticker.closeCh != nil </span>{
+                        <span class="cov8" title="1">close(ticker.closeCh)
+                        ticker.closeCh = nil
+</span>                }
+                <span class="cov8" title="1">ticker.load = 1000
+                ticker.rate = 0
+                ticker.mu.Unlock()</span>
+        }()
+
+        <span class="cov8" title="1">var rl Limiter
+        var tickCh chan struct{}
+        var parentCh &lt;-chan struct{}
+        var parentCloseCh &lt;-chan struct{}
+</span>
+        <span class="cov8" title="1">rl.CloseCh = closeCh
+        rateWhen := time.Now()
+        rateCount := ticker.counter
+        needElapsed := (ticker.timerInterval * 10) / 11
+        if parent != nil </span>{
+                <span class="cov8" title="1">parent.mu.Lock()
+                parentCloseCh = parent.closeCh
+                parent.mu.Unlock()
+                if parentCloseCh == nil </span>{
+                        <span class="cov8" title="1">return
+</span>                }
+                <span class="cov8" title="1">parentCh = parent.C</span>
+        } else {
+                <span class="cov8" title="1">tickCh = ticker.tickCh
+</span>        }
+
+        <span class="cov8" title="1">for !ticker.IsClosed() </span>{
+                <span class="cov8" title="1">select </span>{
+                case tickCh &lt;- struct{}{}:
+                        // sent a tick to a consumer
+                        <span class="cov8" title="1">if parent != nil </span>{
+                                <span class="cov8" title="1">parentCh = parent.C
+                                tickCh = nil
+</span>                        }
+                        <span class="cov8" title="1">ticker.mu.Lock()
+                        doWait := ticker.padding == 0
+                        if doWait </span>{
+                                <span class="cov8" title="1">ticker.counter++
+                                if rateCount == 0 </span>{
+                                        // emulate some load before first actual measurement
+                                        <span class="cov8" title="1">ticker.rate++
+                                        ticker.load = LoadForRate(ticker.rate, ticker.maxrate)
+</span>                                }
+                        } else {
+                                <span class="cov8" title="1">ticker.padding--
+</span>                        }
+                        <span class="cov8" title="1">ticker.mu.Unlock()
+                        if doWait </span>{
+                                <span class="cov8" title="1">rl.Wait(ticker.maxrate)
+</span>                        }
+                case _, ok := &lt;-parentCh:
+                        // if parentCh is not nil, we require a successful read from it
+                        <span class="cov8" title="1">if !ok </span>{
+                                <span class="cov8" title="1">return
+</span>                        }
+                        <span class="cov8" title="1">parentCh = nil
+                        tickCh = ticker.tickCh</span>
+                case &lt;-parentCloseCh:
+                        <span class="cov8" title="1">return</span>
+                case &lt;-timer.C:
+                        // update current rate and load
+                        <span class="cov8" title="1">ticker.mu.Lock()
+                        if elapsed := time.Since(rateWhen); elapsed &gt;= needElapsed </span>{
+                                <span class="cov8" title="1">delta := ticker.counter - rateCount
+                                rateWhen = rateWhen.Add(elapsed)
+                                rateCount = ticker.counter
+                                if delta &gt; 0 </span>{
+                                        <span class="cov8" title="1">ticker.rate = int32(time.Duration(delta) * time.Second / elapsed) // #nosec G115
+                                        ticker.load = LoadForRate(ticker.rate, ticker.maxrate)
+</span>                                } else {
+                                        <span class="cov8" title="1">ticker.rate = 0
+                                        ticker.load = 0
+</span>                                }
+                        }
+                        <span class="cov8" title="1">ticker.mu.Unlock()
+                        timer.Reset(ticker.timerInterval)</span>
+                case &lt;-closeCh:
+                        <span class="cov8" title="1">return</span>
+                }
+        }
+}
+
+// NewTicker returns a Ticker that reads ticks from a parent Ticker
+// and sends a `struct{}{}` at most `*maxrate` times per second.
+//
+// The effective max rate is thus the lower of the parent Tickers
+// maxrate and this Tickers `*maxrate`.
+//
+// A nil `parent` Ticker means tick rate is only limited by `maxrate`.
+// If the parent Ticker is closed, this Ticker will stop sending ticks.
+//
+// A nil `maxrate` or a `*maxrate` of zero or less sends
+// as quickly as possible, so only limited by the parent channel.
+func NewTicker(parent *Ticker, maxrate *int32) *Ticker {
+        <span class="cov8" title="1">if parent != nil </span>{
+                <span class="cov8" title="1">if maxrate == nil </span>{
+                        <span class="cov8" title="1">maxrate = parent.maxrate
+</span>                }
+        }
+        <span class="cov8" title="1">timerInterval := TickerTimerInterval
+        if timerInterval &lt;= 0 </span>{
+                <span class="cov8" title="1">timerInterval = time.Second
+</span>        }
+        <span class="cov8" title="1">ticker := &amp;Ticker{
+                WorkerMax:     10000,
+                WorkerLoad:    1000,
+                WorkerRatio:   1,
+                timerInterval: timerInterval,
+                tickCh:        make(chan struct{}),
+                closeCh:       make(chan struct{}),
+                parent:        parent,
+                maxrate:       maxrate,
+</span>        }
+        <span class="cov8" title="1">ticker.C = ticker.tickCh
+        go ticker.run(ticker.closeCh, parent)
+        return ticker</span>
+}
+</pre>
+		
+		</div>
+	</body>
+	<script>
+	(function() {
+		var files = document.getElementById('files');
+		var visible;
+		files.addEventListener('change', onChange, false);
+		function select(part) {
+			if (visible)
+				visible.style.display = 'none';
+			visible = document.getElementById(part);
+			if (!visible)
+				return;
+			files.value = part;
+			visible.style.display = 'block';
+			location.hash = part;
+		}
+		function onChange() {
+			select(files.value);
+			window.scrollTo(0, 0);
+		}
+		if (location.hash != "") {
+			select(location.hash.substr(1));
+		}
+		if (!visible) {
+			select("file0");
+		}
+	})();
+	</script>
+</html>
